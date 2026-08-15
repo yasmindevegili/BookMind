@@ -85,6 +85,8 @@ docker logs bookmind-backend-1 -f
 
 - **Nunca** executar `git push` nem qualquer variante (push --force, push --tags, etc.). Sempre fornecer o comando para a Yasmin rodar manualmente.
 
+- **Nunca** commitar o diretório `inspo/` — contém referências visuais e arquivos de uso interno. Já está no `.gitignore`.
+
 - **Respostas sempre em português** quando trabalhando neste projeto.
 
 - **Não criar arquivos de documentação extras** (.md) além dos que já existem,

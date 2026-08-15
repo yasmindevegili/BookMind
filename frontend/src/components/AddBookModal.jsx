@@ -71,9 +71,11 @@ export default function AddBookModal({ onClose, onSave }) {
             onChange={update('status')}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
           >
+            <option value="none">Descobrir</option>
             <option value="want_to_read">Quero Ler</option>
             <option value="reading">Lendo</option>
             <option value="read">Lido</option>
+            <option value="abandoned">Abandonado</option>
           </select>
 
           <textarea

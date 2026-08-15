@@ -42,6 +42,10 @@ backend/populate_openlibrary.py
 # Claude Code (configuração local da ferramenta)
 .claude/settings.local.json
 mcp_codebase/
+mcp-codebase/
+
+# Referências visuais e inspirações (uso interno, não versionar)
+inspo/
 
 # OS
 .DS_Store

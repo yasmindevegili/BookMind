@@ -1,6 +1,22 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createAnnotation, getAnnotations, getBook } from '../services/api'
+import { createAnnotation, getAnnotations, getBook, updateBookStatus } from '../services/api'
+
+const STATUS_OPTIONS = [
+  { value: 'none',         label: 'Descobrir' },
+  { value: 'want_to_read', label: 'Quero Ler' },
+  { value: 'reading',      label: 'Lendo' },
+  { value: 'read',         label: 'Lido' },
+  { value: 'abandoned',    label: 'Abandonado' },
+]
+
+const STATUS_STYLE = {
+  read:         'bg-emerald-100 text-emerald-700 border-emerald-200',
+  reading:      'bg-blue-100 text-blue-700 border-blue-200',
+  want_to_read: 'bg-amber-100 text-amber-700 border-amber-200',
+  none:         'bg-gray-100 text-gray-500 border-gray-200',
+  abandoned:    'bg-red-100 text-red-600 border-red-200',
+}
 
 const TYPE_COLORS = {
   highlight: 'bg-yellow-50 border-yellow-200',
@@ -23,6 +39,7 @@ export default function BookDetail() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ type: 'highlight', content: '', chapter: '', page: '' })
   const [saving, setSaving] = useState(false)
+  const [updatingStatus, setUpdatingStatus] = useState(false)
 
   useEffect(() => {
     Promise.all([getBook(id), getAnnotations(id)]).then(([b, a]) => {
@@ -47,6 +64,17 @@ export default function BookDetail() {
       setShowForm(false)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleStatusChange(e) {
+    const newStatus = e.target.value
+    setUpdatingStatus(true)
+    try {
+      const updated = await updateBookStatus(book.id, newStatus)
+      setBook(updated)
+    } finally {
+      setUpdatingStatus(false)
     }
   }
 
@@ -81,6 +109,20 @@ export default function BookDetail() {
             {book.description && (
               <p className="mt-3 text-gray-600 text-sm leading-relaxed">{book.description}</p>
             )}
+            <div className="mt-4">
+              <select
+                value={book.status}
+                onChange={handleStatusChange}
+                disabled={updatingStatus}
+                className={`text-xs font-medium px-3 py-1.5 rounded-full border cursor-pointer
+                  focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60
+                  ${STATUS_STYLE[book.status] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}
+              >
+                {STATUS_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </div>
