@@ -17,5 +17,39 @@
       "Bash(docker *)",
       "Bash(curl *)"
     ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Use the index_new_files MCP tool to update the codebase index with any recently changed files. Call the tool once and finish.",
+            "timeout": 60,
+            "statusMessage": "Atualizando índice do codebase..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git push*)",
+            "command": "printf '{\"continue\": false, \"stopReason\": \"git push bloqueado — forneça o comando para a Yasmin rodar manualmente.\"}'",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "cd /home/parallels/bookmind && docker compose exec -T backend pytest tests/ -v >&2; EXIT=$?; if [ $EXIT -ne 0 ]; then printf '{\"continue\": false, \"stopReason\": \"Testes falharam — commit bloqueado. Corrija os erros acima antes de commitar.\"}'; fi; exit $EXIT",
+            "timeout": 120,
+            "statusMessage": "Rodando testes antes do commit..."
+          }
+        ]
+      }
+    ]
   }
 }

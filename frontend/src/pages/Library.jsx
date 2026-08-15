@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import AddBookModal from '../components/AddBookModal'
 import BookCard from '../components/BookCard'
-import { getBooks } from '../services/api'
+import { getBooks, updateBookStatus } from '../services/api'
 
 const FILTERS = [
-  { value: 'all', label: 'Todos' },
+  { value: 'all', label: 'Descobrir' },
   { value: 'want_to_read', label: 'Quero Ler' },
   { value: 'reading', label: 'Lendo' },
   { value: 'read', label: 'Lidos' },
@@ -57,6 +57,12 @@ export default function Library() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleWantToRead(book) {
+    const newStatus = book.status === 'want_to_read' ? 'none' : 'want_to_read'
+    const updated = await updateBookStatus(book.id, newStatus)
+    setBooks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
   }
 
   const filtered = sortBooks(
@@ -116,7 +122,7 @@ export default function Library() {
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-8">
           {filtered.map((book) => (
-            <BookCard key={book.id} book={book} />
+            <BookCard key={book.id} book={book} onWantToRead={handleWantToRead} />
           ))}
         </div>
       )}
