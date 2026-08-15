@@ -51,3 +51,4 @@ inspo/
 .DS_Store
 Thumbs.db
 backend/fix_calibre_covers.py
+backend/enrich_covers.py
