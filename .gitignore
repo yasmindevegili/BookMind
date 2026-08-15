@@ -50,3 +50,4 @@ inspo/
 # OS
 .DS_Store
 Thumbs.db
+backend/fix_calibre_covers.py

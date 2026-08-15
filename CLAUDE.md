@@ -85,6 +85,10 @@ docker logs bookmind-backend-1 -f
 
 - **Nunca** executar `git push` nem qualquer variante (push --force, push --tags, etc.). Sempre fornecer o comando para a Yasmin rodar manualmente.
 
+- **Toda nova task começa com uma branch.** Antes de qualquer implementação, criar branch seguindo a convenção (`feat/nome`, `fix/nome`, `chore/nome`). Ao finalizar a task, commitar tudo que foi feito nessa branch.
+
+- **Testes E2E são gate obrigatório antes do commit de encerramento de task.** Rodar `docker compose exec backend pytest tests/ -v` e só commitar se todos passarem.
+
 - **Nunca** commitar o diretório `inspo/` — contém referências visuais e arquivos de uso interno. Já está no `.gitignore`.
 
 - **Respostas sempre em português** quando trabalhando neste projeto.

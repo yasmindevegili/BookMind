@@ -52,6 +52,28 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 - Qualquer arquivo com API key, token ou senha
 - Antes de commitar, verificar `git diff --staged` e confirmar que nenhum segredo está incluído
 
+### Fluxo obrigatório por task
+
+Toda task segue este ciclo — sem exceção:
+
+```bash
+# 1. Início da task — criar branch
+git checkout -b feat/nome-da-task   # ou fix/ ou chore/
+
+# 2. Durante o desenvolvimento — commits incrementais conforme necessário
+
+# 3. Antes do commit final — testes E2E obrigatórios
+docker compose exec backend pytest tests/ -v
+# Só avança se todos passarem. Falha = não commita, investiga e corrige.
+
+# 4. Fim da task — commitar tudo e fornecer comando de push
+git add <arquivos>
+git commit -m "feat: descrição da task concluída"
+# → fornecer: git push origin feat/nome-da-task
+```
+
+Nunca implementar direto na `main`. Se a Yasmin iniciar uma task sem branch criada, criar a branch antes de qualquer edição. Nunca commitar o encerramento de uma task sem os testes E2E terem passado.
+
 ### Estado atual do repositório
 
 - Branch principal: `main`
