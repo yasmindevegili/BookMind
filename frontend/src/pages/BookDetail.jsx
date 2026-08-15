@@ -3,20 +3,12 @@ import { Link, useParams } from 'react-router-dom'
 import { createAnnotation, getAnnotations, getBook, updateBookStatus } from '../services/api'
 
 const STATUS_OPTIONS = [
-  { value: 'none',         label: 'Descobrir' },
-  { value: 'want_to_read', label: 'Quero Ler' },
-  { value: 'reading',      label: 'Lendo' },
-  { value: 'read',         label: 'Lido' },
-  { value: 'abandoned',    label: 'Abandonado' },
+  { value: 'want_to_read', label: 'Quero Ler',  active: 'bg-amber-100 text-amber-700 border-amber-300',  inactive: 'bg-white text-gray-500 border-gray-200 hover:border-amber-200 hover:text-amber-600' },
+  { value: 'reading',      label: 'Lendo',       active: 'bg-blue-100 text-blue-700 border-blue-300',    inactive: 'bg-white text-gray-500 border-gray-200 hover:border-blue-200 hover:text-blue-600' },
+  { value: 'read',         label: 'Lido',        active: 'bg-emerald-100 text-emerald-700 border-emerald-300', inactive: 'bg-white text-gray-500 border-gray-200 hover:border-emerald-200 hover:text-emerald-600' },
+  { value: 'abandoned',    label: 'Abandonado',  active: 'bg-red-100 text-red-600 border-red-300',       inactive: 'bg-white text-gray-500 border-gray-200 hover:border-red-200 hover:text-red-500' },
 ]
 
-const STATUS_STYLE = {
-  read:         'bg-emerald-100 text-emerald-700 border-emerald-200',
-  reading:      'bg-blue-100 text-blue-700 border-blue-200',
-  want_to_read: 'bg-amber-100 text-amber-700 border-amber-200',
-  none:         'bg-gray-100 text-gray-500 border-gray-200',
-  abandoned:    'bg-red-100 text-red-600 border-red-200',
-}
 
 const TYPE_COLORS = {
   highlight: 'bg-yellow-50 border-yellow-200',
@@ -67,8 +59,8 @@ export default function BookDetail() {
     }
   }
 
-  async function handleStatusChange(e) {
-    const newStatus = e.target.value
+  async function handleStatusChange(value) {
+    const newStatus = book.status === value ? 'none' : value
     setUpdatingStatus(true)
     try {
       const updated = await updateBookStatus(book.id, newStatus)
@@ -110,18 +102,20 @@ export default function BookDetail() {
               <p className="mt-3 text-gray-600 text-sm leading-relaxed">{book.description}</p>
             )}
             <div className="mt-4">
-              <select
-                value={book.status}
-                onChange={handleStatusChange}
-                disabled={updatingStatus}
-                className={`text-xs font-medium px-3 py-1.5 rounded-full border cursor-pointer
-                  focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60
-                  ${STATUS_STYLE[book.status] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}
-              >
-                {STATUS_OPTIONS.map(({ value, label }) => (
-                  <option key={value} value={value}>{label}</option>
+              <p className="text-xs text-gray-400 mb-1.5 font-medium">Status</p>
+              <div className="flex flex-wrap gap-2">
+                {STATUS_OPTIONS.map(({ value, label, active, inactive }) => (
+                  <button
+                    key={value}
+                    onClick={() => handleStatusChange(value)}
+                    disabled={updatingStatus}
+                    className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors disabled:opacity-50 cursor-pointer
+                      ${book.status === value ? active : inactive}`}
+                  >
+                    {label}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
           </div>
         </div>

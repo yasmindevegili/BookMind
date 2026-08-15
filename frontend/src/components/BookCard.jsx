@@ -5,7 +5,6 @@ const STATUS = {
   read:         { label: 'Lido',        css: 'bg-emerald-100 text-emerald-700' },
   reading:      { label: 'Lendo',       css: 'bg-blue-100 text-blue-700' },
   want_to_read: { label: 'Quero ler',   css: 'bg-amber-100 text-amber-700' },
-  none:         { label: 'Descobrir',   css: 'bg-gray-100 text-gray-500' },
   abandoned:    { label: 'Abandonado',  css: 'bg-red-100 text-red-600' },
 }
 
@@ -61,10 +60,25 @@ function PlaceholderCover({ title, author }) {
   )
 }
 
-export default function BookCard({ book }) {
+export default function BookCard({ book, onWantToRead }) {
   const cover  = betterCover(book.cover_url)
-  const status = STATUS[book.status] ?? { label: book.status, css: 'bg-gray-100 text-gray-600' }
+  const status = STATUS[book.status] ?? null
   const [imgFailed, setImgFailed] = useState(false)
+  const [adding, setAdding] = useState(false)
+
+  async function handleWantToRead(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!onWantToRead || adding) return
+    setAdding(true)
+    try {
+      await onWantToRead(book)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const isWantToRead = book.status === 'want_to_read'
 
   return (
     <Link to={`/books/${book.id}`} className="group block">
@@ -95,17 +109,32 @@ export default function BookCard({ book }) {
           <p className="text-white/70 text-xs mt-0.5 line-clamp-1 drop-shadow">{book.author}</p>
           {book.rating && <Stars rating={book.rating} />}
         </div>
-      </div>
 
-      {/* Status + avaliação abaixo da capa */}
-      <div className="mt-2 px-0.5 flex items-center justify-between gap-1">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.css}`}>
-          {status.label}
-        </span>
-        {book.rating && (
-          <span className="text-amber-400 text-xs">{'★'.repeat(Math.round(book.rating))}</span>
+        {/* Botão Quero Ler — sempre visível se ativo, hover nos demais */}
+        {onWantToRead && (
+          <button
+            onClick={handleWantToRead}
+            disabled={adding}
+            title={isWantToRead ? 'Remover de Quero Ler' : 'Quero Ler'}
+            className={`absolute top-2 right-2 transition-all duration-200
+              rounded-full w-7 h-7 flex items-center justify-center shadow-md disabled:opacity-50
+              ${isWantToRead
+                ? 'opacity-100 bg-amber-400 text-white hover:bg-amber-500'
+                : 'opacity-0 group-hover:opacity-100 bg-white/90 text-gray-700 hover:bg-amber-400 hover:text-white'
+              }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+              <path fillRule="evenodd" d="M6.32 2.577a49.255 49.255 0 0 1 11.36 0c1.497.174 2.57 1.46 2.57 2.93V21a.75.75 0 0 1-1.085.67L12 18.089l-7.165 3.583A.75.75 0 0 1 3.75 21V5.507c0-1.47 1.073-2.756 2.57-2.93Z" clipRule="evenodd" />
+            </svg>
+          </button>
         )}
       </div>
+
+      {book.rating && (
+        <div className="mt-2 px-0.5">
+          <span className="text-amber-400 text-xs">{'★'.repeat(Math.round(book.rating))}</span>
+        </div>
+      )}
     </Link>
   )
 }
