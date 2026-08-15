@@ -60,11 +60,12 @@ function PlaceholderCover({ title, author }) {
   )
 }
 
-export default function BookCard({ book, onWantToRead }) {
+export default function BookCard({ book, onWantToRead, onRead }) {
   const cover  = betterCover(book.cover_url)
   const status = STATUS[book.status] ?? null
   const [imgFailed, setImgFailed] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [marking, setMarking] = useState(false)
 
   async function handleWantToRead(e) {
     e.preventDefault()
@@ -78,7 +79,20 @@ export default function BookCard({ book, onWantToRead }) {
     }
   }
 
+  async function handleRead(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!onRead || marking) return
+    setMarking(true)
+    try {
+      await onRead(book)
+    } finally {
+      setMarking(false)
+    }
+  }
+
   const isWantToRead = book.status === 'want_to_read'
+  const isRead = book.status === 'read'
 
   return (
     <Link to={`/books/${book.id}`} className="group block">
@@ -110,7 +124,26 @@ export default function BookCard({ book, onWantToRead }) {
           {book.rating && <Stars rating={book.rating} />}
         </div>
 
-        {/* Botão Quero Ler — sempre visível se ativo, hover nos demais */}
+        {/* Botão Lido — canto superior esquerdo */}
+        {onRead && (
+          <button
+            onClick={handleRead}
+            disabled={marking}
+            title={isRead ? 'Remover de Lidos' : 'Marcar como Lido'}
+            className={`absolute top-2 left-2 transition-all duration-200
+              rounded-full w-7 h-7 flex items-center justify-center shadow-md disabled:opacity-50
+              ${isRead
+                ? 'opacity-100 bg-emerald-500 text-white hover:bg-emerald-600'
+                : 'opacity-0 group-hover:opacity-100 bg-white/90 text-gray-700 hover:bg-emerald-500 hover:text-white'
+              }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+              <path fillRule="evenodd" d="M19.916 4.626a.75.75 0 0 1 .208 1.04l-9 13.5a.75.75 0 0 1-1.154.114l-6-6a.75.75 0 0 1 1.06-1.06l5.353 5.353 8.493-12.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+            </svg>
+          </button>
+        )}
+
+        {/* Botão Quero Ler — canto superior direito */}
         {onWantToRead && (
           <button
             onClick={handleWantToRead}

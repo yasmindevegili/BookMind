@@ -65,6 +65,12 @@ export default function Library() {
     setBooks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
   }
 
+  async function handleRead(book) {
+    const newStatus = book.status === 'read' ? 'none' : 'read'
+    const updated = await updateBookStatus(book.id, newStatus)
+    setBooks((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
+  }
+
   const filtered = sortBooks(
     filter === 'all' ? books : books.filter((b) => b.status === filter),
     sort,
@@ -75,7 +81,7 @@ export default function Library() {
       <div className="flex justify-between items-center mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Minha Biblioteca</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{books.length} livros</p>
+          <p className="text-sm text-gray-500 mt-0.5">{filtered.length} livros</p>
         </div>
         <button
           onClick={() => setShowAdd(true)}
@@ -122,7 +128,7 @@ export default function Library() {
       ) : (
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-8">
           {filtered.map((book) => (
-            <BookCard key={book.id} book={book} onWantToRead={handleWantToRead} />
+            <BookCard key={book.id} book={book} onWantToRead={handleWantToRead} onRead={handleRead} />
           ))}
         </div>
       )}

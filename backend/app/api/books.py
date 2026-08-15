@@ -14,11 +14,11 @@ from ..services.embeddings import embedding_service
 router = APIRouter()
 
 STATUS_ORDER = case(
-    (Book.status == BookStatus.none, 0),
-    (Book.status == BookStatus.want_to_read, 1),
-    (Book.status == BookStatus.reading, 2),
-    (Book.status == BookStatus.read, 3),
-    (Book.status == BookStatus.abandoned, 4),
+    (Book.status == BookStatus.want_to_read, 0),
+    (Book.status == BookStatus.reading, 1),
+    (Book.status == BookStatus.read, 2),
+    (Book.status == BookStatus.abandoned, 3),
+    (Book.status == BookStatus.none, 4),
     else_=5,
 )
 
