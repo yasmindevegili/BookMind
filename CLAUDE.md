@@ -83,6 +83,8 @@ docker logs bookmind-backend-1 -f
 
 - **Nunca** pedir permissão para comandos de leitura (grep, find, ls, cat, git log, git status, git diff, docker ps, docker logs). Já configurado em settings.json.
 
+- **Nunca** executar `git push` nem qualquer variante (push --force, push --tags, etc.). Sempre fornecer o comando para a Yasmin rodar manualmente.
+
 - **Respostas sempre em português** quando trabalhando neste projeto.
 
 - **Não criar arquivos de documentação extras** (.md) além dos que já existem,
