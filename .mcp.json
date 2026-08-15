@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "bookmind-codebase": {
+      "command": "python3",
+      "args": ["-m", "mcp_codebase"],
+      "cwd": "/home/parallels/bookmind"
+    }
+  }
+}

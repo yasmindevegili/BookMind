@@ -1,0 +1,21 @@
+{
+  "enabledMcpjsonServers": ["bookmind-codebase"],
+  "permissions": {
+    "allow": [
+      "Bash(grep *)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(git log *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git show *)",
+      "Bash(docker ps *)",
+      "Bash(docker logs *)",
+      "Bash(docker *)",
+      "Bash(curl *)"
+    ]
+  }
+}
