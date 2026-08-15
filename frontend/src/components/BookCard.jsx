@@ -5,7 +5,6 @@ const STATUS = {
   read:         { label: 'Lido',        css: 'bg-emerald-100 text-emerald-700' },
   reading:      { label: 'Lendo',       css: 'bg-blue-100 text-blue-700' },
   want_to_read: { label: 'Quero ler',   css: 'bg-amber-100 text-amber-700' },
-  none:         { label: 'Descobrir',   css: 'bg-gray-100 text-gray-500' },
   abandoned:    { label: 'Abandonado',  css: 'bg-red-100 text-red-600' },
 }
 
@@ -63,7 +62,7 @@ function PlaceholderCover({ title, author }) {
 
 export default function BookCard({ book }) {
   const cover  = betterCover(book.cover_url)
-  const status = STATUS[book.status] ?? { label: book.status, css: 'bg-gray-100 text-gray-600' }
+  const status = STATUS[book.status] ?? null
   const [imgFailed, setImgFailed] = useState(false)
 
   return (
@@ -99,9 +98,11 @@ export default function BookCard({ book }) {
 
       {/* Status + avaliação abaixo da capa */}
       <div className="mt-2 px-0.5 flex items-center justify-between gap-1">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.css}`}>
-          {status.label}
-        </span>
+        {status && (
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${status.css}`}>
+            {status.label}
+          </span>
+        )}
         {book.rating && (
           <span className="text-amber-400 text-xs">{'★'.repeat(Math.round(book.rating))}</span>
         )}

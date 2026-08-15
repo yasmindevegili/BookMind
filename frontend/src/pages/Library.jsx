@@ -4,7 +4,7 @@ import BookCard from '../components/BookCard'
 import { getBooks } from '../services/api'
 
 const FILTERS = [
-  { value: 'all', label: 'Descobrir' },
+  { value: 'all', label: 'Todos' },
   { value: 'want_to_read', label: 'Quero Ler' },
   { value: 'reading', label: 'Lendo' },
   { value: 'read', label: 'Lidos' },
