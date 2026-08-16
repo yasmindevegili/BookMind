@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     # Modo debug: limita livros retornados na listagem (0 = desativado)
     DEBUG_BOOK_LIMIT: int = 0
 
+    # Calibre-Web (Babel) — fonte de capas local
+    BABEL_URL: str = "http://192.168.1.56:8083"
+    BABEL_USER: str = ""
+    BABAL_PASS: str = ""  # typo preservado do .env original
+
     model_config = {"env_file": ".env"}
 
 
