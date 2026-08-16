@@ -93,11 +93,43 @@ export default function BookDetail() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900 leading-tight">{book.title}</h2>
             <p className="text-lg text-gray-500 mt-1">{book.author}</p>
-            <div className="flex flex-wrap gap-3 mt-3 text-sm text-gray-500">
-              {book.genre && <span>📖 {book.genre}</span>}
-              {book.year_published && <span>📅 {book.year_published}</span>}
-              {book.rating && <span>⭐ {book.rating}/5</span>}
+
+            <div className="flex flex-wrap gap-2 mt-3">
+              {book.genre && (
+                <span className="text-xs px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full">{book.genre}</span>
+              )}
+              {book.year_published && (
+                <span className="text-xs px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full">{book.year_published}</span>
+              )}
+              {book.rating && (
+                <span className="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">
+                  {'★'.repeat(Math.round(book.rating))} {book.rating}/5
+                </span>
+              )}
             </div>
+
+            {book.tags && book.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {book.tags.map((tag) => (
+                  <span key={tag} className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-full">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-3 space-y-1 text-xs text-gray-500">
+              {book.isbn && (
+                <p><span className="text-gray-400">ISBN</span> {book.isbn}</p>
+              )}
+              {book.started_at && (
+                <p><span className="text-gray-400">Início</span> {new Date(book.started_at).toLocaleDateString('pt-BR')}</p>
+              )}
+              {book.finished_at && (
+                <p><span className="text-gray-400">Término</span> {new Date(book.finished_at).toLocaleDateString('pt-BR')}</p>
+              )}
+            </div>
+
             {book.description && (
               <p className="mt-3 text-gray-600 text-sm leading-relaxed">{book.description}</p>
             )}
