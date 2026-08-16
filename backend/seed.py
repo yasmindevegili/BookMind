@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Popula o banco com livros reais e anotações em português.
+Popula o banco com livros reais e anotações em português, gerando embeddings automaticamente.
 
 Execute dentro do Docker:
   docker compose exec backend python seed.py
 
-Depois, chame POST /api/annotations/embed-all para gerar embeddings.
 Os embeddings são gerados localmente (fastembed) — nenhuma API key adicional necessária.
 """
 import asyncio
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app.core.database import AsyncSessionLocal, Base, engine
 from app.models.annotation import Annotation
 from app.models.book import Book
-from sqlalchemy import text
+from app.services.embeddings import embedding_service
+from sqlalchemy import select, text
 
 BOOKS = [
     {
@@ -327,7 +328,7 @@ async def seed():
 
     # Verificar se já tem dados
     async with AsyncSessionLocal() as db:
-        from sqlalchemy import select, func
+        from sqlalchemy import func
         count = await db.execute(select(func.count()).select_from(Book))
         existing = count.scalar()
         if existing > 0:
@@ -355,9 +356,31 @@ async def seed():
     print(f"\n✅ Seed concluído!")
     print(f"   {len(BOOKS)} livros inseridos")
     print(f"   {total_annotations} anotações inseridas (todas em português)")
-    print(f"\n📌 Próximo passo obrigatório para o chat funcionar:")
-    print(f"   curl -X POST http://localhost:8000/api/annotations/embed-all")
-    print(f"   (aguarde ~30 segundos para os embeddings serem gerados em background)")
+
+    print(f"\n⏳ Gerando embeddings...")
+    async with AsyncSessionLocal() as db:
+        books_result = await db.execute(select(Book).where(Book.embedding.is_(None)))
+        books_pending = books_result.scalars().all()
+        for book in books_pending:
+            parts = [book.title, book.author]
+            if book.genre:
+                parts.append(book.genre)
+            if book.description:
+                parts.append(book.description)
+            book.embedding = await embedding_service.embed(". ".join(parts))
+        await db.commit()
+        print(f"   {len(books_pending)} livros indexados")
+
+    async with AsyncSessionLocal() as db:
+        anns_result = await db.execute(select(Annotation).where(Annotation.embedded_at.is_(None)))
+        anns_pending = anns_result.scalars().all()
+        for ann in anns_pending:
+            ann.embedding = await embedding_service.embed(ann.content)
+            ann.embedded_at = datetime.utcnow()
+        await db.commit()
+        print(f"   {len(anns_pending)} anotações indexadas")
+
+    print(f"\n🚀 Pronto para usar — o chat já funciona!")
 
 
 if __name__ == "__main__":
