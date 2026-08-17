@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createAnnotation, getAnnotations, getBook, updateBookStatus } from '../services/api'
+import BookCard from '../components/BookCard'
+import { createAnnotation, getAnnotations, getBook, getSimilarBooks, updateBookStatus } from '../services/api'
 
 const STATUS_OPTIONS = [
   { value: 'want_to_read', label: 'Quero Ler',  active: 'bg-amber-100 text-amber-700 border-amber-300',  inactive: 'bg-white text-gray-500 border-gray-200 hover:border-amber-200 hover:text-amber-600' },
@@ -32,12 +33,21 @@ export default function BookDetail() {
   const [form, setForm] = useState({ type: 'highlight', content: '', chapter: '', page: '' })
   const [saving, setSaving] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [similarBooks, setSimilarBooks] = useState([])
 
   useEffect(() => {
     Promise.all([getBook(id), getAnnotations(id)]).then(([b, a]) => {
       setBook(b)
       setAnnotations(a)
     })
+    getSimilarBooks(id, 12).then(setSimilarBooks).catch(() => {})
+
+    // Registra visita para influenciar o algoritmo de Descobrir
+    const key = 'bookmind_recently_viewed'
+    const prev = JSON.parse(localStorage.getItem(key) || '[]')
+    localStorage.setItem(key, JSON.stringify(
+      [Number(id), ...prev.filter((x) => x !== Number(id))].slice(0, 10)
+    ))
   }, [id])
 
   async function handleAdd() {
@@ -240,6 +250,17 @@ export default function BookDetail() {
           ))
         )}
       </div>
+
+      {similarBooks.length > 0 && (
+        <div className="mt-10 pt-8 border-t border-gray-100">
+          <h3 className="font-semibold text-gray-900 mb-4">Você também pode gostar</h3>
+          <div className="grid grid-cols-4 gap-4">
+            {similarBooks.map((b) => (
+              <BookCard key={b.id} book={b} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

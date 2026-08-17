@@ -18,9 +18,6 @@ class Settings(BaseSettings):
 
     RAG_TOP_K: int = 5
 
-    # Modo debug: limita livros retornados na listagem (0 = desativado)
-    DEBUG_BOOK_LIMIT: int = 0
-
     # Calibre-Web (Babel) — fonte de capas local
     BABEL_URL: str = "http://192.168.1.56:8083"
     BABEL_USER: str = ""
