@@ -10,6 +10,7 @@ from ..models.book import Book, BookStatus
 from ..schemas.book import BookCreate, BookResponse, BookStatusUpdate, BookUpdate
 from ..services.covers import cover_service
 from ..services.embeddings import embedding_service
+from ..services.metadata import metadata_service
 
 router = APIRouter()
 
@@ -36,6 +37,27 @@ async def _generate_book_embedding(book_id: int) -> None:
             parts.append(book.description)
         book.embedding = await embedding_service.embed(". ".join(parts))
         await db.commit()
+
+
+async def _enrich_book_metadata(book_id: int) -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Book).where(Book.id == book_id))
+        book = result.scalar_one_or_none()
+        if not book:
+            return
+        meta = await metadata_service.fetch(book.title, book.author, book.isbn)
+        changed = False
+        if meta["description"] and not book.description:
+            book.description = meta["description"]
+            changed = True
+        if meta["year_published"] and not book.year_published:
+            book.year_published = meta["year_published"]
+            changed = True
+        if changed:
+            await db.commit()
+            await db.refresh(book)
+            # Regenera embedding com os metadados enriquecidos
+            await _generate_book_embedding(book_id)
 
 
 async def _fetch_book_cover(book_id: int) -> None:
@@ -171,6 +193,18 @@ async def embed_all_books(background_tasks: BackgroundTasks, db: AsyncSession = 
     pending = result.scalars().all()
     for book in pending:
         background_tasks.add_task(_generate_book_embedding, book.id)
+    return {"queued": len(pending)}
+
+
+@router.post("/enrich-descriptions")
+async def enrich_descriptions(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Busca descrição e ano no Google Books para livros sem esses campos e regenera embeddings."""
+    result = await db.execute(
+        select(Book).where((Book.description.is_(None)) | (Book.description == ""))
+    )
+    pending = result.scalars().all()
+    for book in pending:
+        background_tasks.add_task(_enrich_book_metadata, book.id)
     return {"queued": len(pending)}
 
 
