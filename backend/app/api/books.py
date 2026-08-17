@@ -11,6 +11,7 @@ from ..schemas.book import BookCreate, BookResponse, BookStatusUpdate, BookUpdat
 from ..services.covers import cover_service
 from ..services.embeddings import embedding_service
 from ..services.metadata import metadata_service
+from ..services.tagger import tagger_service
 
 router = APIRouter()
 
@@ -33,6 +34,8 @@ async def _generate_book_embedding(book_id: int) -> None:
         parts = [book.title, book.author]
         if book.genre:
             parts.append(book.genre)
+        if book.tags:
+            parts.append(", ".join(book.tags))
         if book.description:
             parts.append(book.description)
         book.embedding = await embedding_service.embed(". ".join(parts))
@@ -57,6 +60,19 @@ async def _enrich_book_metadata(book_id: int) -> None:
             await db.commit()
             await db.refresh(book)
             # Regenera embedding com os metadados enriquecidos
+            await _generate_book_embedding(book_id)
+
+
+async def _tag_book(book_id: int) -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Book).where(Book.id == book_id))
+        book = result.scalar_one_or_none()
+        if not book:
+            return
+        tags = await tagger_service.tag(book.title, book.author, book.description, book.isbn)
+        if tags:
+            book.tags = tags
+            await db.commit()
             await _generate_book_embedding(book_id)
 
 
@@ -205,6 +221,20 @@ async def enrich_descriptions(background_tasks: BackgroundTasks, db: AsyncSessio
     pending = result.scalars().all()
     for book in pending:
         background_tasks.add_task(_enrich_book_metadata, book.id)
+    return {"queued": len(pending)}
+
+
+@router.post("/tag-all")
+async def tag_all_books(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Gera tags literárias para livros sem tags via Open Library + LLM fallback."""
+    result = await db.execute(
+        select(Book).where(
+            (Book.tags.is_(None)) | (func.cardinality(Book.tags) == 0)
+        )
+    )
+    pending = result.scalars().all()
+    for book in pending:
+        background_tasks.add_task(_tag_book, book.id)
     return {"queued": len(pending)}
 
 
