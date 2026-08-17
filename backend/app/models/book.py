@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..core.database import Base
+from .associations import collection_books  # noqa: F401 — necessário para o relationship
 
 
 class BookStatus(str, enum.Enum):
@@ -42,4 +43,8 @@ class Book(Base):
 
     annotations: Mapped[list["Annotation"]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
+    )
+    collections: Mapped[list["Collection"]] = relationship(  # noqa: F821
+        secondary=collection_books,
+        back_populates="books",
     )

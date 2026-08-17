@@ -27,6 +27,11 @@ _OL_AWARD_PATTERNS = [
 ]
 
 
+def _is_award_tag(s: str) -> bool:
+    low = s.lower().strip()
+    return any(p in low for p in _OL_AWARD_PATTERNS)
+
+
 def _is_genre_tag(s: str) -> bool:
     """Retorna True apenas se o subject parece um gênero/tema literário real."""
     low = s.lower().strip()
@@ -36,13 +41,25 @@ def _is_genre_tag(s: str) -> bool:
         return False
     if any(p in low for p in ["isbn", "lccn", "dewey", "oclc", "lcsh"]):
         return False
-    if any(p in low for p in _OL_AWARD_PATTERNS):
+    if _is_award_tag(s):
         return False
     return True
 
 
-def _filter_subjects(subjects: list[str]) -> list[str]:
-    return [s for s in subjects if _is_genre_tag(s)]
+def _split_subjects(subjects: list[str]) -> tuple[list[str], list[str]]:
+    """Separa subjects em (tags_literárias, tags_de_prêmio)."""
+    genre_tags, award_tags = [], []
+    for s in subjects:
+        low = s.lower().strip()
+        if low in _OL_NOISE or len(low) < 4 or len(low) > 60:
+            continue
+        if any(p in low for p in ["isbn", "lccn", "dewey", "oclc", "lcsh"]):
+            continue
+        if _is_award_tag(s):
+            award_tags.append(s)
+        else:
+            genre_tags.append(s)
+    return genre_tags, award_tags
 
 
 class TaggerService:
@@ -59,33 +76,37 @@ class TaggerService:
     def __init__(self):
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
-    async def tag(self, title: str, author: str, description: str | None = None, isbn: str | None = None) -> list[str]:
-        tags = await self._from_openlibrary(title, author, isbn)
-        if len(tags) >= 3:
-            return tags[:8]
-        return await self._from_llm(title, author, description)
+    async def tag(
+        self, title: str, author: str, description: str | None = None, isbn: str | None = None
+    ) -> tuple[list[str], list[str]]:
+        """Retorna (tags_literárias, tags_de_prêmio)."""
+        genre_tags, award_tags = await self._from_openlibrary(title, author, isbn)
+        if len(genre_tags) >= 3:
+            return genre_tags[:8], award_tags
+        llm_tags = await self._from_llm(title, author, description)
+        return llm_tags, award_tags
 
-    async def _from_openlibrary(self, title: str, author: str, isbn: str | None) -> list[str]:
+    async def _from_openlibrary(
+        self, title: str, author: str, isbn: str | None
+    ) -> tuple[list[str], list[str]]:
         async with httpx.AsyncClient(timeout=10) as client:
-            # Passo 1: busca o OLID do livro
             olid = await self._resolve_olid(client, title, author, isbn)
             if not olid:
-                return []
+                return [], []
 
-            # Passo 2: busca os subjects estruturados via Works API
             try:
                 resp = await client.get(f"{_OL_WORKS_URL}{olid}.json")
                 resp.raise_for_status()
                 data = resp.json()
             except Exception:
-                return []
+                return [], []
 
-            subjects = data.get("subjects", [])
-            places = data.get("subject_places", [])
-            times = data.get("subject_times", [])
-
-            all_tags = _filter_subjects(subjects + places + times)
-            return all_tags
+            all_subjects = (
+                data.get("subjects", [])
+                + data.get("subject_places", [])
+                + data.get("subject_times", [])
+            )
+            return _split_subjects(all_subjects)
 
     async def _resolve_olid(
         self, client: httpx.AsyncClient, title: str, author: str, isbn: str | None

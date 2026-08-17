@@ -1,11 +1,14 @@
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+import numpy as np
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from ..core.database import AsyncSessionLocal, get_db
 from ..models.book import Book, BookStatus
+from ..models.collection import Collection
 from ..schemas.book import BookCreate, BookResponse, BookStatusUpdate, BookUpdate
 from ..services.covers import cover_service
 from ..services.embeddings import embedding_service
@@ -62,16 +65,42 @@ async def _enrich_book_metadata(book_id: int) -> None:
             await _generate_book_embedding(book_id)
 
 
+def _award_to_slug(name: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+
+
 async def _tag_book(book_id: int) -> None:
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Book).where(Book.id == book_id))
         book = result.scalar_one_or_none()
         if not book:
             return
-        tags = await tagger_service.tag(book.title, book.author, book.description, book.isbn)
-        if tags:
-            book.tags = tags
+
+        genre_tags, award_tags = await tagger_service.tag(
+            book.title, book.author, book.description, book.isbn
+        )
+
+        if genre_tags:
+            book.tags = genre_tags
+
+        # Adiciona o livro às coleções de curadoria correspondentes aos prêmios
+        for award in award_tags:
+            slug = _award_to_slug(award)
+            col_result = await db.execute(
+                select(Collection).where(Collection.slug == slug)
+            )
+            collection = col_result.scalar_one_or_none()
+            if not collection:
+                collection = Collection(name=award, slug=slug, type="curadoria")
+                db.add(collection)
+                await db.flush()
+            if book not in collection.books:
+                collection.books.append(book)
+
+        if genre_tags or award_tags:
             await db.commit()
+        if genre_tags:
             await _generate_book_embedding(book_id)
 
 
@@ -98,7 +127,7 @@ async def list_tags(db: AsyncSession = Depends(get_db)):
 @router.get("/by-tag/{tag}", response_model=list[BookResponse])
 async def books_by_tag(tag: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Book).where(Book.tags.any(tag)).order_by(Book.title)
+        select(Book).options(defer(Book.embedding)).where(Book.tags.any(tag)).order_by(Book.title)
     )
     return result.scalars().all()
 
@@ -106,15 +135,75 @@ async def books_by_tag(tag: str, db: AsyncSession = Depends(get_db)):
 @router.get("/by-status/{status}", response_model=list[BookResponse])
 async def books_by_status(status: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Book).where(Book.status == status).order_by(Book.title)
+        select(Book).options(defer(Book.embedding)).where(Book.status == status).order_by(Book.title)
     )
     return result.scalars().all()
 
 
 @router.get("/", response_model=list[BookResponse])
 async def list_books(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Book).order_by(STATUS_ORDER, Book.title))
+    result = await db.execute(
+        select(Book).options(defer(Book.embedding)).order_by(STATUS_ORDER, Book.title)
+    )
     return result.scalars().all()
+
+
+@router.get("/discover", response_model=list[BookResponse])
+async def discover_books(
+    limit: int = 56,
+    recently_viewed: str = Query(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    recently_ids = {int(x) for x in recently_viewed.split(",") if x.strip().isdigit()}
+
+    # Carrega apenas os livros que formam o perfil de gosto (conjunto pequeno)
+    profile_statuses = [BookStatus.read, BookStatus.want_to_read]
+    profile_filter = Book.status.in_(profile_statuses)
+    if recently_ids:
+        from sqlalchemy import or_
+        profile_filter = or_(profile_filter, Book.id.in_(recently_ids))
+
+    profile_result = await db.execute(
+        select(Book).where(profile_filter).where(Book.embedding.is_not(None))
+    )
+    profile_books = profile_result.scalars().all()
+
+    if not profile_books:
+        # Sem perfil: fallback para want_to_read primeiro, depois alfabético
+        fallback = await db.execute(
+            select(Book)
+            .where(Book.status.notin_([BookStatus.read, BookStatus.reading, BookStatus.abandoned]))
+            .order_by(STATUS_ORDER, Book.title)
+            .limit(limit)
+        )
+        return fallback.scalars().all()
+
+    # Computa o vetor de gosto ponderado em Python (poucos livros)
+    weights_map = {BookStatus.read: 1.0, BookStatus.want_to_read: 0.6}
+    profile: list[tuple[list[float], float]] = []
+    for b in profile_books:
+        w = weights_map.get(b.status, 0.4 if b.id in recently_ids else 0.0)
+        if w > 0:
+            profile.append((b.embedding, w))
+
+    vecs = np.array([v for v, _ in profile], dtype=np.float32)
+    weights = np.array([w for _, w in profile], dtype=np.float32)
+    taste = np.average(vecs, axis=0, weights=weights)
+    norm = np.linalg.norm(taste)
+    if norm > 0:
+        taste /= norm
+
+    # Ranking feito pelo pgvector no banco — zero loop Python sobre candidatos
+    exclude = [BookStatus.read, BookStatus.reading, BookStatus.abandoned]
+    ranked = await db.execute(
+        select(Book)
+        .options(defer(Book.embedding))
+        .where(Book.status.notin_(exclude))
+        .where(Book.embedding.is_not(None))
+        .order_by(Book.embedding.cosine_distance(taste.tolist()))
+        .limit(limit)
+    )
+    return ranked.scalars().all()
 
 
 @router.post("/", response_model=BookResponse)
@@ -220,13 +309,16 @@ async def enrich_descriptions(background_tasks: BackgroundTasks, db: AsyncSessio
 
 
 @router.post("/tag-all")
-async def tag_all_books(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    """Gera tags literárias para livros sem tags via Open Library + LLM fallback."""
-    result = await db.execute(
-        select(Book).where(
-            (Book.tags.is_(None)) | (func.cardinality(Book.tags) == 0)
-        )
-    )
+async def tag_all_books(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), limit: int = 0):
+    """Gera tags literárias para livros sem tags via Open Library + LLM fallback.
+    Use limit para processar em lotes (0 = todos).
+    """
+    q = select(Book).where(
+        (Book.tags.is_(None)) | (func.cardinality(Book.tags) == 0)
+    ).order_by(Book.id)
+    if limit > 0:
+        q = q.limit(limit)
+    result = await db.execute(q)
     pending = result.scalars().all()
     for book in pending:
         background_tasks.add_task(_tag_book, book.id)
