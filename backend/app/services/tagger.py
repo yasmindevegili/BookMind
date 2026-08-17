@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import httpx
 from groq import AsyncGroq
 
@@ -73,6 +76,13 @@ class TaggerService:
          suficiente, especialmente brasileiros
     """
 
+    # Máx. 10 requisições simultâneas ao Open Library (API pública sem auth).
+    _ol_sem = asyncio.Semaphore(10)
+    # Máx. 1 chamada simultânea ao LLM com intervalo mínimo de 2.1s (≤28 req/min,
+    # abaixo do limite de 30 req/min do Groq free tier).
+    _llm_sem = asyncio.Semaphore(1)
+    _llm_last: float = 0.0
+
     def __init__(self):
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
@@ -89,24 +99,25 @@ class TaggerService:
     async def _from_openlibrary(
         self, title: str, author: str, isbn: str | None
     ) -> tuple[list[str], list[str]]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            olid = await self._resolve_olid(client, title, author, isbn)
-            if not olid:
-                return [], []
+        async with TaggerService._ol_sem:
+            async with httpx.AsyncClient(timeout=10, verify=False) as client:
+                olid = await self._resolve_olid(client, title, author, isbn)
+                if not olid:
+                    return [], []
 
-            try:
-                resp = await client.get(f"{_OL_WORKS_URL}{olid}.json")
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception:
-                return [], []
+                try:
+                    resp = await client.get(f"{_OL_WORKS_URL}{olid}.json")
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception:
+                    return [], []
 
-            all_subjects = (
-                data.get("subjects", [])
-                + data.get("subject_places", [])
-                + data.get("subject_times", [])
-            )
-            return _split_subjects(all_subjects)
+                all_subjects = (
+                    data.get("subjects", [])
+                    + data.get("subject_places", [])
+                    + data.get("subject_times", [])
+                )
+                return _split_subjects(all_subjects)
 
     async def _resolve_olid(
         self, client: httpx.AsyncClient, title: str, author: str, isbn: str | None
@@ -142,25 +153,31 @@ class TaggerService:
         return None
 
     async def _from_llm(self, title: str, author: str, description: str | None) -> list[str]:
-        desc_ctx = f"\nSinopse: {description[:300]}" if description else ""
-        prompt = (
-            f'Livro: "{title}" de {author}.{desc_ctx}\n\n'
-            "Liste de 6 a 8 tags literárias compactas em português (minúsculas, sem acentos obrigatórios) "
-            "que descrevam: subgênero, temas principais, época/cenário, estilo narrativo e tom emocional. "
-            "Responda APENAS com as tags separadas por vírgula, sem explicações nem numeração."
-        )
-        try:
-            resp = await self.client.chat.completions.create(
-                model=settings.GENERATION_MODEL,
-                max_tokens=80,
-                temperature=0.3,
-                messages=[{"role": "user", "content": prompt}],
+        async with TaggerService._llm_sem:
+            wait = 2.1 - (time.monotonic() - TaggerService._llm_last)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            TaggerService._llm_last = time.monotonic()
+
+            desc_ctx = f"\nSinopse: {description[:300]}" if description else ""
+            prompt = (
+                f'Livro: "{title}" de {author}.{desc_ctx}\n\n'
+                "Liste de 6 a 8 tags literárias compactas em português (minúsculas, sem acentos obrigatórios) "
+                "que descrevam: subgênero, temas principais, época/cenário, estilo narrativo e tom emocional. "
+                "Responda APENAS com as tags separadas por vírgula, sem explicações nem numeração."
             )
-            raw = resp.choices[0].message.content.strip()
-            tags = [t.strip().lower() for t in raw.split(",") if t.strip()]
-            return [t for t in tags if 3 <= len(t) <= 50][:8]
-        except Exception:
-            return []
+            try:
+                resp = await self.client.chat.completions.create(
+                    model=settings.GENERATION_MODEL,
+                    max_tokens=80,
+                    temperature=0.3,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = resp.choices[0].message.content.strip()
+                tags = [t.strip().lower() for t in raw.split(",") if t.strip()]
+                return [t for t in tags if 3 <= len(t) <= 50][:8]
+            except Exception:
+                return []
 
 
 tagger_service = TaggerService()

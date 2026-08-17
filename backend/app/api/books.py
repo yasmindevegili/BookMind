@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 import numpy as np
@@ -309,19 +310,26 @@ async def enrich_descriptions(background_tasks: BackgroundTasks, db: AsyncSessio
 
 
 @router.post("/tag-all")
-async def tag_all_books(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), limit: int = 0):
-    """Gera tags literárias para livros sem tags via Open Library + LLM fallback.
-    Use limit para processar em lotes (0 = todos).
+async def tag_all_books(
+    db: AsyncSession = Depends(get_db),
+    limit: int = 0,
+    force: bool = False,
+):
+    """Gera tags literárias para livros via Open Library + LLM fallback.
+    force=true inclui livros que já têm tags (re-tagueia tudo).
+    limit > 0 processa apenas N livros por vez.
+    Usa asyncio.create_task para paralelismo real — os semáforos no tagger
+    controlam a concorrência efetiva (10 no Open Library, 1 no LLM).
     """
-    q = select(Book).where(
-        (Book.tags.is_(None)) | (func.cardinality(Book.tags) == 0)
-    ).order_by(Book.id)
+    q = select(Book).order_by(Book.id)
+    if not force:
+        q = q.where((Book.tags.is_(None)) | (func.cardinality(Book.tags) == 0))
     if limit > 0:
         q = q.limit(limit)
     result = await db.execute(q)
     pending = result.scalars().all()
     for book in pending:
-        background_tasks.add_task(_tag_book, book.id)
+        asyncio.create_task(_tag_book(book.id))
     return {"queued": len(pending)}
 
 

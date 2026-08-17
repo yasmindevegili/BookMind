@@ -14,14 +14,11 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSIONS: int = 384  # dimensões do modelo multilingual
 
     # Modelo de geração via Groq (gratuito)
-    GENERATION_MODEL: str = "llama-3.3-70b-versatile"
+    GENERATION_MODEL: str = "groq/compound"
 
     RAG_TOP_K: int = 5
 
-    # Modo debug: limita livros retornados na listagem (0 = desativado)
-    DEBUG_BOOK_LIMIT: int = 0
-
-    # Calibre-Web (Babel) — fonte de capas local
+# Calibre-Web (Babel) — fonte de capas local
     BABEL_URL: str = "http://192.168.1.56:8083"
     BABEL_USER: str = ""
     BABAL_PASS: str = ""  # typo preservado do .env original

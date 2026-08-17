@@ -36,11 +36,18 @@ export default function BookDetail() {
   const [similarBooks, setSimilarBooks] = useState([])
 
   useEffect(() => {
-    Promise.all([getBook(id), getAnnotations(id), getSimilarBooks(id)]).then(([b, a, s]) => {
+    Promise.all([getBook(id), getAnnotations(id)]).then(([b, a]) => {
       setBook(b)
       setAnnotations(a)
-      setSimilarBooks(s)
     })
+    getSimilarBooks(id, 12).then(setSimilarBooks).catch(() => {})
+
+    // Registra visita para influenciar o algoritmo de Descobrir
+    const key = 'bookmind_recently_viewed'
+    const prev = JSON.parse(localStorage.getItem(key) || '[]')
+    localStorage.setItem(key, JSON.stringify(
+      [Number(id), ...prev.filter((x) => x !== Number(id))].slice(0, 10)
+    ))
   }, [id])
 
   async function handleAdd() {
