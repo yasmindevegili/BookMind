@@ -4,7 +4,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.config import get_settings
 from ..core.database import AsyncSessionLocal, get_db
 from ..models.book import Book, BookStatus
 from ..schemas.book import BookCreate, BookResponse, BookStatusUpdate, BookUpdate
@@ -114,11 +113,7 @@ async def books_by_status(status: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/", response_model=list[BookResponse])
 async def list_books(db: AsyncSession = Depends(get_db)):
-    settings = get_settings()
-    q = select(Book).order_by(STATUS_ORDER, Book.title)
-    if settings.DEBUG_BOOK_LIMIT > 0:
-        q = q.limit(settings.DEBUG_BOOK_LIMIT)
-    result = await db.execute(q)
+    result = await db.execute(select(Book).order_by(STATUS_ORDER, Book.title))
     return result.scalars().all()
 
 
@@ -236,6 +231,81 @@ async def tag_all_books(background_tasks: BackgroundTasks, db: AsyncSession = De
     for book in pending:
         background_tasks.add_task(_tag_book, book.id)
     return {"queued": len(pending)}
+
+
+@router.post("/normalize-tags")
+async def normalize_tags(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Traduz e normaliza todas as tags para português com acentuação correta.
+
+    Coleta as tags distintas do banco, envia em batches ao LLM para tradução,
+    e atualiza todos os livros com as tags corrigidas. Roda de forma síncrona
+    e retorna ao final com o resumo do que foi alterado.
+    """
+    from groq import AsyncGroq
+
+    client = AsyncGroq(api_key=get_settings().GROQ_API_KEY)
+
+    # 1. Coleta todas as tags distintas
+    result = await db.execute(
+        select(func.unnest(Book.tags)).distinct()
+    )
+    all_tags = [row[0] for row in result.all() if row[0]]
+    if not all_tags:
+        return {"message": "Nenhuma tag encontrada.", "updated_books": 0}
+
+    # 2. Traduz em batches de 60 tags por chamada ao LLM
+    mapping: dict[str, str] = {}
+    batch_size = 60
+    for i in range(0, len(all_tags), batch_size):
+        batch = all_tags[i:i + batch_size]
+        tags_str = "\n".join(f"- {t}" for t in batch)
+        prompt = (
+            "Traduza e normalize as tags literárias abaixo para português do Brasil, "
+            "com acentuação e ortografia corretas, em letras minúsculas. "
+            "Mantenha o significado original. Responda APENAS no formato:\n"
+            "tag original|tag em português\n\n"
+            f"Tags:\n{tags_str}"
+        )
+        try:
+            resp = await client.chat.completions.create(
+                model=get_settings().GENERATION_MODEL,
+                max_tokens=400,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            for line in resp.choices[0].message.content.strip().splitlines():
+                if "|" in line:
+                    original, translated = line.split("|", 1)
+                    original = original.strip().lstrip("- ")
+                    translated = translated.strip().lower()
+                    if original and translated:
+                        mapping[original] = translated
+        except Exception:
+            # Se o batch falhar, mantém as tags originais
+            for t in batch:
+                mapping[t] = t
+
+    # 3. Atualiza os livros cujas tags mudaram
+    books_result = await db.execute(
+        select(Book).where(func.cardinality(Book.tags) > 0)
+    )
+    books = books_result.scalars().all()
+    updated_ids = []
+    for book in books:
+        new_tags = [mapping.get(t, t) for t in book.tags]
+        if new_tags != book.tags:
+            book.tags = new_tags
+            updated_ids.append(book.id)
+    if updated_ids:
+        await db.commit()
+        for book_id in updated_ids:
+            background_tasks.add_task(_generate_book_embedding, book_id)
+
+    return {
+        "distinct_tags_processed": len(all_tags),
+        "books_updated": len(updated_ids),
+        "sample_translations": dict(list(mapping.items())[:10]),
+    }
 
 
 @router.delete("/{book_id}")
