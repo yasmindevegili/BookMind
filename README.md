@@ -8,7 +8,7 @@ Biblioteca pessoal com RAG — registre livros e anotações, converse com seu a
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-[![Abrir no Claude Code](https://img.shields.io/badge/Claude_Code-Onboarding-D97706?style=flat-square&logo=anthropic&logoColor=white)](https://claude.ai/claude-code/onboard/btppo72eApJ6)
+![Claude Code](https://img.shields.io/badge/Claude_Code-Onboarding-D97706?style=flat-square&logo=anthropic&logoColor=white)
 
 ---
 
