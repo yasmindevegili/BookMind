@@ -9,6 +9,9 @@ from ..core.config import get_settings
 
 settings = get_settings()
 
+# Modelo dedicado ao tagger — sem thinking mode, retorna JSON limpo e rápido
+_TAGGER_MODEL = "groq/compound-mini"
+
 _OL_SEARCH_URL = "https://openlibrary.org/search.json"
 _OL_WORKS_URL = "https://openlibrary.org"
 
@@ -62,14 +65,14 @@ class TaggerService:
       4. title_en é persistido no banco como cache — re-tagueações futuras pulam o LLM
     """
 
-    _ol_sem = asyncio.Semaphore(10)
-    # Máx. 1 chamada simultânea ao LLM com intervalo mínimo de 2.1s (≤28 req/min,
-    # abaixo do limite de 30 req/min do Groq free tier).
-    _llm_sem = asyncio.Semaphore(1)
+    # Semáforos em nível de instância evitam bloqueio residual após cancelamento de tasks
+    # (ex: restart do backend cancela tasks em voo, deixando semáforos de classe travados)
     _llm_last: float = 0.0
 
     def __init__(self):
         self.client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+        self._ol_sem = asyncio.Semaphore(10)
+        self._llm_sem = asyncio.Semaphore(1)
 
     async def tag(
         self,
@@ -103,11 +106,11 @@ class TaggerService:
         self, title: str, author: str, description: str | None
     ) -> tuple[str | None, list[str]]:
         """Chama o LLM uma única vez para obter title_en + tags de fallback em JSON."""
-        async with TaggerService._llm_sem:
-            wait = 2.1 - (time.monotonic() - TaggerService._llm_last)
+        async with self._llm_sem:
+            wait = 2.1 - (time.monotonic() - self.__class__._llm_last)
             if wait > 0:
                 await asyncio.sleep(wait)
-            TaggerService._llm_last = time.monotonic()
+            self.__class__._llm_last = time.monotonic()
 
             desc_ctx = f"\nSinopse: {description[:300]}" if description else ""
             prompt = (
@@ -122,13 +125,12 @@ class TaggerService:
             )
             try:
                 resp = await self.client.chat.completions.create(
-                    model=settings.GENERATION_MODEL,
-                    max_tokens=150,
+                    model=_TAGGER_MODEL,
+                    max_tokens=300,
                     temperature=0.2,
                     messages=[{"role": "user", "content": prompt}],
                 )
                 raw = resp.choices[0].message.content.strip()
-                # Remove markdown code fences if present
                 if raw.startswith("```"):
                     raw = raw.split("```")[1]
                     if raw.startswith("json"):
@@ -146,11 +148,11 @@ class TaggerService:
         self, title: str, author: str, description: str | None
     ) -> list[str]:
         """Fallback de tags apenas (quando title_en já era conhecido mas OL falhou)."""
-        async with TaggerService._llm_sem:
-            wait = 2.1 - (time.monotonic() - TaggerService._llm_last)
+        async with self._llm_sem:
+            wait = 2.1 - (time.monotonic() - self.__class__._llm_last)
             if wait > 0:
                 await asyncio.sleep(wait)
-            TaggerService._llm_last = time.monotonic()
+            self.__class__._llm_last = time.monotonic()
 
             desc_ctx = f"\nSinopse: {description[:300]}" if description else ""
             prompt = (
@@ -161,8 +163,8 @@ class TaggerService:
             )
             try:
                 resp = await self.client.chat.completions.create(
-                    model=settings.GENERATION_MODEL,
-                    max_tokens=80,
+                    model=_TAGGER_MODEL,
+                    max_tokens=150,
                     temperature=0.3,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -175,7 +177,7 @@ class TaggerService:
     async def _from_openlibrary(
         self, title: str, author: str, isbn: str | None
     ) -> tuple[list[str], list[str]]:
-        async with TaggerService._ol_sem:
+        async with self._ol_sem:
             async with httpx.AsyncClient(timeout=10, verify=False) as client:
                 olid = await self._resolve_olid(client, title, author, isbn)
                 if not olid:

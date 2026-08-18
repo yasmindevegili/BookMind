@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from .api import annotations, books, chat, covers, profile
+from .api import annotations, books, chat, collections, covers, profile
 from .core.database import Base, engine
 
 
@@ -37,6 +37,7 @@ app.include_router(annotations.router, prefix="/api/annotations", tags=["annotat
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(profile.router, prefix="/api/profile", tags=["profile"])
 app.include_router(covers.router, prefix="/api/covers", tags=["covers"])
+app.include_router(collections.router, prefix="/api/collections", tags=["collections"])
 
 
 @app.get("/health")

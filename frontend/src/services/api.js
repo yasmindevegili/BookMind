@@ -38,3 +38,19 @@ export const deleteAnnotation = (id) => request(`/annotations/${id}`, { method: 
 
 export const chat = (query) => request('/chat/', { method: 'POST', body: { query } })
 export const getProfile = () => request('/profile/')
+
+export const getCuradoriaCollections = () => request('/collections/')
+export const getCollectionBooks = (slug) => request(`/collections/${slug}/books`)
+export const initializeCuradoria = () => request('/collections/initialize', { method: 'POST' })
+
+export const getComputedMeta = () => request('/collections/computed')
+export const getComputedBooks = (slug) => request(`/collections/computed/${slug}/books`)
+export const getGenreList = () => request('/collections/computed/generos')
+export const getGenreBooks = (genre) => request(`/collections/computed/genero/${encodeURIComponent(genre)}`)
+
+export const getLancamentos = () => request('/collections/computed/lancamentos')
+export const getGoogleBooksTrending = () => request('/collections/computed/google-books')
+export const getTagLivrosTrending = (collection = 'best-sellers') =>
+  request(`/collections/computed/tag-livros?collection=${collection}`)
+export const getNytTrending = (list = 'hardcover-fiction') =>
+  request(`/collections/computed/nyt?list_name=${list}`)
