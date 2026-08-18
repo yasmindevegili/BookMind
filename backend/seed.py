@@ -23,6 +23,7 @@ from sqlalchemy import select, text
 BOOKS = [
     {
         "title": "Trabalho Focado: Como Ter Sucesso em um Mundo Distraído",
+        "title_en": "Deep Work",
         "author": "Cal Newport",
         "genre": "Produtividade",
         "isbn": "978-1455586691",

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 
 import numpy as np
@@ -8,11 +9,17 @@ from sqlalchemy.orm import defer
 
 from ..core.database import AsyncSessionLocal, get_db
 from ..models.book import Book, BookStatus
+from ..models.collection import Collection
 from ..schemas.book import BookCreate, BookResponse, BookStatusUpdate, BookUpdate
 from ..services.covers import cover_service
 from ..services.embeddings import embedding_service
+from ..services.metadata import metadata_service
+from ..services.tagger import tagger_service
 
 router = APIRouter()
+
+# Limita tasks simultâneas de tagging para não esgotar o pool de conexões DB (size=5, overflow=10)
+_tag_db_sem = asyncio.Semaphore(5)
 
 STATUS_ORDER = case(
     (Book.status == BookStatus.want_to_read, 0),
@@ -33,10 +40,75 @@ async def _generate_book_embedding(book_id: int) -> None:
         parts = [book.title, book.author]
         if book.genre:
             parts.append(book.genre)
+        if book.tags:
+            parts.append(", ".join(book.tags))
         if book.description:
             parts.append(book.description)
         book.embedding = await embedding_service.embed(". ".join(parts))
         await db.commit()
+
+
+async def _enrich_book_metadata(book_id: int) -> None:
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Book).where(Book.id == book_id))
+        book = result.scalar_one_or_none()
+        if not book:
+            return
+        meta = await metadata_service.fetch(book.title, book.author, book.isbn)
+        changed = False
+        if meta["description"] and not book.description:
+            book.description = meta["description"]
+            changed = True
+        if meta["year_published"] and not book.year_published:
+            book.year_published = meta["year_published"]
+            changed = True
+        if changed:
+            await db.commit()
+            await db.refresh(book)
+            # Regenera embedding com os metadados enriquecidos
+            await _generate_book_embedding(book_id)
+
+
+def _award_to_slug(name: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+
+
+async def _tag_book(book_id: int) -> None:
+    async with _tag_db_sem:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Book).where(Book.id == book_id))
+            book = result.scalar_one_or_none()
+            if not book:
+                return
+
+            genre_tags, award_tags, title_en_resolved = await tagger_service.tag(
+                book.title, book.author, book.description, book.isbn, book.title_en
+            )
+
+            if genre_tags:
+                book.tags = genre_tags
+            if title_en_resolved and not book.title_en:
+                book.title_en = title_en_resolved
+
+            # Adiciona o livro às coleções de curadoria correspondentes aos prêmios
+            for award in award_tags:
+                slug = _award_to_slug(award)
+                col_result = await db.execute(
+                    select(Collection).where(Collection.slug == slug)
+                )
+                collection = col_result.scalar_one_or_none()
+                if not collection:
+                    collection = Collection(name=award, slug=slug, type="curadoria")
+                    db.add(collection)
+                    await db.flush()
+                if book not in collection.books:
+                    collection.books.append(book)
+
+            if genre_tags or award_tags:
+                await db.commit()
+            if genre_tags:
+                await _generate_book_embedding(book_id)
 
 
 async def _fetch_book_cover(book_id: int) -> None:
@@ -107,7 +179,6 @@ async def discover_books(
         # Sem perfil: fallback para want_to_read primeiro, depois alfabético
         fallback = await db.execute(
             select(Book)
-            .options(defer(Book.embedding))
             .where(Book.status.notin_([BookStatus.read, BookStatus.reading, BookStatus.abandoned]))
             .order_by(STATUS_ORDER, Book.title)
             .limit(limit)
@@ -230,6 +301,117 @@ async def embed_all_books(background_tasks: BackgroundTasks, db: AsyncSession = 
     for book in pending:
         background_tasks.add_task(_generate_book_embedding, book.id)
     return {"queued": len(pending)}
+
+
+@router.post("/enrich-descriptions")
+async def enrich_descriptions(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Busca descrição e ano no Google Books para livros sem esses campos e regenera embeddings."""
+    result = await db.execute(
+        select(Book).where((Book.description.is_(None)) | (Book.description == ""))
+    )
+    pending = result.scalars().all()
+    for book in pending:
+        background_tasks.add_task(_enrich_book_metadata, book.id)
+    return {"queued": len(pending)}
+
+
+@router.post("/tag-all")
+async def tag_all_books(
+    db: AsyncSession = Depends(get_db),
+    limit: int = 0,
+    force: bool = False,
+):
+    """Gera tags literárias para livros via Open Library + LLM fallback.
+    force=true inclui livros que já têm tags (re-tagueia tudo).
+    limit > 0 processa apenas N livros por vez.
+    Usa asyncio.create_task para paralelismo real — os semáforos no tagger
+    controlam a concorrência efetiva (10 no Open Library, 1 no LLM).
+    """
+    q = select(Book).order_by(Book.id)
+    if not force:
+        q = q.where((Book.tags.is_(None)) | (func.cardinality(Book.tags) == 0))
+    if limit > 0:
+        q = q.limit(limit)
+    result = await db.execute(q)
+    pending = result.scalars().all()
+    for book in pending:
+        asyncio.create_task(_tag_book(book.id))
+    return {"queued": len(pending)}
+
+
+@router.post("/normalize-tags")
+async def normalize_tags(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Traduz e normaliza todas as tags para português com acentuação correta.
+
+    Coleta as tags distintas do banco, envia em batches ao LLM para tradução,
+    e atualiza todos os livros com as tags corrigidas. Roda de forma síncrona
+    e retorna ao final com o resumo do que foi alterado.
+    """
+    from groq import AsyncGroq
+
+    client = AsyncGroq(api_key=get_settings().GROQ_API_KEY)
+
+    # 1. Coleta todas as tags distintas
+    result = await db.execute(
+        select(func.unnest(Book.tags)).distinct()
+    )
+    all_tags = [row[0] for row in result.all() if row[0]]
+    if not all_tags:
+        return {"message": "Nenhuma tag encontrada.", "updated_books": 0}
+
+    # 2. Traduz em batches de 60 tags por chamada ao LLM
+    mapping: dict[str, str] = {}
+    batch_size = 60
+    for i in range(0, len(all_tags), batch_size):
+        batch = all_tags[i:i + batch_size]
+        tags_str = "\n".join(f"- {t}" for t in batch)
+        prompt = (
+            "Traduza e normalize as tags literárias abaixo para português do Brasil, "
+            "com acentuação e ortografia corretas, em letras minúsculas. "
+            "Mantenha o significado original. Responda APENAS no formato:\n"
+            "tag original|tag em português\n\n"
+            f"Tags:\n{tags_str}"
+        )
+        try:
+            resp = await client.chat.completions.create(
+                model=get_settings().GENERATION_MODEL,
+                max_tokens=400,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            for line in resp.choices[0].message.content.strip().splitlines():
+                if "|" in line:
+                    original, translated = line.split("|", 1)
+                    original = original.strip().lstrip("- ")
+                    translated = translated.strip().lower()
+                    if original and translated:
+                        mapping[original] = translated
+        except Exception:
+            # Se o batch falhar, mantém as tags originais
+            for t in batch:
+                mapping[t] = t
+
+    # 3. Atualiza os livros cujas tags mudaram
+    books_result = await db.execute(
+        select(Book).where(func.cardinality(Book.tags) > 0)
+    )
+    books = books_result.scalars().all()
+    updated_ids = []
+    for book in books:
+        new_tags = [mapping.get(t, t) for t in book.tags]
+        if new_tags != book.tags:
+            book.tags = new_tags
+            updated_ids.append(book.id)
+    if updated_ids:
+        await db.commit()
+        for book_id in updated_ids:
+            background_tasks.add_task(_generate_book_embedding, book_id)
+
+    return {
+        "distinct_tags_processed": len(all_tags),
+        "books_updated": len(updated_ids),
+        "sample_translations": dict(list(mapping.items())[:10]),
+    }
 
 
 @router.delete("/{book_id}")

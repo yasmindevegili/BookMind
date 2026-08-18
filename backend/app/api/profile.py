@@ -1,10 +1,12 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import get_db
 from ..models.annotation import Annotation
-from ..models.book import Book
+from ..models.book import Book, BookStatus
 
 router = APIRouter()
 
@@ -28,6 +30,15 @@ async def get_profile(db: AsyncSession = Depends(get_db)):
 
     embedded_count = sum(1 for a in annotations if a.embedded_at)
 
+    current_year = datetime.utcnow().year
+    year_result = await db.execute(
+        select(func.count()).select_from(Book).where(
+            Book.status == BookStatus.read,
+            extract("year", Book.finished_at) == current_year,
+        )
+    )
+    books_read_this_year = year_result.scalar() or 0
+
     return {
         "total_books": len(books),
         "total_annotations": len(annotations),
@@ -35,4 +46,5 @@ async def get_profile(db: AsyncSession = Depends(get_db)):
         "status_distribution": status_counts,
         "favorite_genres": sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)[:5],
         "average_rating": sum(b.rating for b in rated_books) / len(rated_books) if rated_books else None,
+        "books_read_this_year": books_read_this_year,
     }
