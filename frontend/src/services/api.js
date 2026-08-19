@@ -42,3 +42,8 @@ export const getProfile = () => request('/profile/')
 export const getCuradoriaCollections = () => request('/collections/')
 export const getCollectionBooks = (slug) => request(`/collections/${slug}/books`)
 export const initializeCuradoria = () => request('/collections/initialize', { method: 'POST' })
+
+export const getComputedMeta = () => request('/collections/computed')
+export const getComputedBooks = (slug) => request(`/collections/computed/${slug}/books`)
+export const getGenreList = () => request('/collections/computed/generos')
+export const getGenreBooks = (genre) => request(`/collections/computed/genero/${encodeURIComponent(genre)}`)
