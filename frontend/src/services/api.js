@@ -38,3 +38,7 @@ export const deleteAnnotation = (id) => request(`/annotations/${id}`, { method: 
 
 export const chat = (query) => request('/chat/', { method: 'POST', body: { query } })
 export const getProfile = () => request('/profile/')
+
+export const getCuradoriaCollections = () => request('/collections/')
+export const getCollectionBooks = (slug) => request(`/collections/${slug}/books`)
+export const initializeCuradoria = () => request('/collections/initialize', { method: 'POST' })

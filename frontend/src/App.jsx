@@ -2,6 +2,7 @@ import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
 import BookDetail from './pages/BookDetail'
 import Chat from './pages/Chat'
 import Collections from './pages/Collections'
+import Curadoria from './pages/Curadoria'
 import Library from './pages/Library'
 import Profile from './pages/Profile'
 import StatusBooks from './pages/StatusBooks'
@@ -36,6 +37,7 @@ export default function App() {
           </div>
           <ul className="space-y-1">
             <li><NavItem to="/" label="Biblioteca" exact /></li>
+            <li><NavItem to="/curadoria" label="Curadoria" /></li>
             <li><NavItem to="/chat" label="Chat" /></li>
             <li><NavItem to="/profile" label="Perfil" /></li>
           </ul>
@@ -45,6 +47,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Library />} />
             <Route path="/collections" element={<Collections />} />
+            <Route path="/curadoria" element={<Curadoria />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/books/:id" element={<BookDetail />} />
             <Route path="/profile" element={<Profile />} />
