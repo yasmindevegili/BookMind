@@ -16,6 +16,7 @@ class BookCreate(BaseModel):
     year_published: Optional[int] = None
     rating: Optional[float] = None
     tags: Optional[list[str]] = None
+    title_en: Optional[str] = None
     status: BookStatus = BookStatus.none
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -31,6 +32,7 @@ class BookUpdate(BaseModel):
     year_published: Optional[int] = None
     rating: Optional[float] = None
     tags: Optional[list[str]] = None
+    title_en: Optional[str] = None
     status: Optional[BookStatus] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -51,6 +53,7 @@ class BookResponse(BaseModel):
     year_published: Optional[int] = None
     rating: Optional[float] = None
     tags: Optional[list[str]] = None
+    title_en: Optional[str] = None
     status: BookStatus
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
