@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, or_, select
@@ -308,8 +309,62 @@ async def _fetch_google_books(api_key: str | None) -> list[_RawBook]:
     return books
 
 
-async def _fetch_nyt(api_key: str, list_name: str) -> list[_RawBook]:
-    """Busca uma lista específica do NYT Bestsellers."""
+async def _find_portuguese_edition(
+    client: httpx.AsyncClient,
+    title: str,
+    author: str,
+    gb_key: str | None,
+) -> "_RawBook | None":
+    """Busca edição em português de um livro originalmente em inglês via Google Books."""
+    params = {
+        "q": f'intitle:"{title}" inauthor:"{author.split()[-1]}"',
+        "maxResults": 3,
+        "langRestrict": "pt",
+        "printType": "books",
+    }
+    if gb_key:
+        params["key"] = gb_key
+    try:
+        resp = await client.get("https://www.googleapis.com/books/v1/volumes", params=params)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+    except Exception:
+        return None
+
+    for item in items:
+        info = item.get("volumeInfo", {})
+        pt_title = (info.get("title") or "").strip()
+        pt_authors = info.get("authors", [])
+        if not pt_title or not pt_authors:
+            continue
+
+        # Valida: pelo menos uma palavra do sobrenome do autor original deve aparecer
+        author_last = author.split()[-1].lower()
+        if not any(author_last in a.lower() for a in pt_authors):
+            continue
+
+        isbn = None
+        for ident in info.get("industryIdentifiers", []):
+            if ident.get("type") == "ISBN_13":
+                isbn = ident["identifier"]
+                break
+
+        thumb = info.get("imageLinks", {}).get("thumbnail", "")
+        cover = thumb.replace("http://", "https://").replace("zoom=1", "zoom=2") if thumb else None
+
+        return _RawBook(
+            title=pt_title,
+            authors=pt_authors,
+            isbn=isbn,
+            cover_url=cover,
+            description=(info.get("description") or "")[:500] or None,
+            source="nyt_pt",
+        )
+    return None
+
+
+async def _fetch_nyt(api_key: str, list_name: str, gb_key: str | None = None) -> list[_RawBook]:
+    """Busca uma lista NYT Bestsellers e enriquece com edições em português via Google Books."""
     url = f"https://api.nytimes.com/svc/books/v3/lists/current/{list_name}.json"
     try:
         async with httpx.AsyncClient(timeout=10, verify=False) as client:
@@ -319,10 +374,10 @@ async def _fetch_nyt(api_key: str, list_name: str) -> list[_RawBook]:
     except Exception:
         return []
 
-    books = []
+    en_books: list[_RawBook] = []
     for b in data.get("results", {}).get("books", []):
         isbn = b.get("primary_isbn13") or b.get("primary_isbn10") or None
-        books.append(_RawBook(
+        en_books.append(_RawBook(
             title=b.get("title", "").title(),
             authors=[b.get("author", "")],
             isbn=isbn,
@@ -330,6 +385,23 @@ async def _fetch_nyt(api_key: str, list_name: str) -> list[_RawBook]:
             description=b.get("description") or None,
             source="nyt",
         ))
+
+    if not en_books:
+        return []
+
+    # Busca edições em PT em paralelo para todos os livros
+    async with httpx.AsyncClient(timeout=10, verify=False) as client:
+        pt_results = await asyncio.gather(
+            *[_find_portuguese_edition(client, b.title, b.authors[0], gb_key) for b in en_books],
+            return_exceptions=True,
+        )
+
+    books = []
+    for en, pt in zip(en_books, pt_results):
+        if isinstance(pt, _RawBook):
+            books.append(pt)
+        else:
+            books.append(en)
     return books
 
 
@@ -357,7 +429,7 @@ async def nyt_trending(list_name: str = "hardcover-fiction", db: AsyncSession = 
     settings = get_settings()
     if not settings.NYT_API_KEY:
         return {"source": "nyt", "name": "NYT Bestsellers", "matched": [], "discover": [], "configured": False}
-    raw = await _fetch_nyt(settings.NYT_API_KEY, list_name)
+    raw = await _fetch_nyt(settings.NYT_API_KEY, list_name, settings.GOOGLE_BOOKS_API_KEY or None)
     matched, discover = await _cross_reference(raw, db)
     label = "Ficção" if "fiction" in list_name else "Não-Ficção"
     return {

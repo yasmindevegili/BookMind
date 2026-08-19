@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSIONS: int = 384  # dimensões do modelo multilingual
 
     # Modelo de geração via Groq (gratuito)
-    GENERATION_MODEL: str = "groq/compound"
+    GENERATION_MODEL: str = "qwen/qwen3.6-27b"
 
     RAG_TOP_K: int = 5
 
