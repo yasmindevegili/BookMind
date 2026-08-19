@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import BookCard from '../components/BookCard'
 import {
+  createBook,
   getCollectionBooks,
   getCuradoriaCollections,
   getGenreBooks,
   getGenreList,
+  getGoogleBooksTrending,
+  getNytTrending,
   initializeCuradoria,
 } from '../services/api'
 
@@ -188,11 +191,163 @@ function GenerosTab() {
   )
 }
 
+// ── DiscoverCard — livro externo não no acervo ───────────────────
+
+function DiscoverCard({ book, onAdded }) {
+  const [state, setState] = useState('idle') // idle | adding | done
+
+  async function handleAdd() {
+    setState('adding')
+    try {
+      await createBook({
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn || undefined,
+        cover_url: book.cover_url || undefined,
+        description: book.description || undefined,
+      })
+      setState('done')
+      onAdded?.()
+    } catch {
+      setState('idle')
+    }
+  }
+
+  return (
+    <div className="relative w-36 group flex-none" style={{ scrollSnapAlign: 'start' }}>
+      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-gradient-to-br from-indigo-50 to-purple-100 mb-2">
+        {book.cover_url ? (
+          <img src={book.cover_url} alt={book.title} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+            <span className="text-2xl mb-1">📘</span>
+            <span className="text-xs text-gray-500 line-clamp-3">{book.title}</span>
+          </div>
+        )}
+        {state !== 'done' && (
+          <button
+            onClick={handleAdd}
+            disabled={state === 'adding'}
+            className="absolute inset-x-0 bottom-0 bg-indigo-600/90 backdrop-blur-sm text-white text-xs py-1.5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-60"
+          >
+            {state === 'adding' ? '…' : '+ Adicionar'}
+          </button>
+        )}
+        {state === 'done' && (
+          <div className="absolute inset-x-0 bottom-0 bg-green-600/90 text-white text-xs py-1.5 text-center">
+            ✓ Adicionado
+          </div>
+        )}
+      </div>
+      <p className="text-xs font-medium text-gray-800 truncate">{book.title}</p>
+      <p className="text-xs text-gray-500 truncate">{book.author}</p>
+    </div>
+  )
+}
+
+// ── TrendingCarousel — fonte (Google Books ou NYT) ───────────────
+
+function TrendingCarousel({ fetcher }) {
+  const [data, setData]   = useState(null)
+  const [loading, setLoading] = useState(true)
+  const matchRef   = useRef(null)
+  const discoverRef = useRef(null)
+
+  useEffect(() => {
+    fetcher().then(setData).finally(() => setLoading(false))
+  }, [])
+
+  if (loading) {
+    return <div className="h-52 flex items-center justify-center text-gray-200 text-sm mb-10">Carregando…</div>
+  }
+
+  if (!data) return null
+
+  const { name, matched, discover, configured } = data
+  const scroll = (ref, dir) => ref.current?.scrollBy({ left: dir * 240, behavior: 'smooth' })
+
+  if (!configured) {
+    return (
+      <section className="mb-10 p-5 rounded-xl border border-dashed border-gray-200 bg-gray-50">
+        <p className="font-semibold text-gray-700 mb-1">{name}</p>
+        <p className="text-sm text-gray-500 mb-3">
+          Configure a chave <code className="bg-gray-100 px-1 rounded text-xs">NYT_API_KEY</code> no <code className="bg-gray-100 px-1 rounded text-xs">.env</code> para ativar esta lista.
+        </p>
+        <a
+          href="https://developer.nytimes.com/get-started"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-xs text-indigo-600 hover:underline"
+        >
+          → Obter chave gratuita em developer.nytimes.com
+        </a>
+      </section>
+    )
+  }
+
+  if (matched.length === 0 && discover.length === 0) return null
+
+  return (
+    <section className="mb-10">
+      <p className="text-base font-bold text-gray-900 mb-4">{name}</p>
+
+      {matched.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">No seu acervo · {matched.length} livros</p>
+            <div className="flex gap-1">
+              <button onClick={() => scroll(matchRef, -1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">‹</button>
+              <button onClick={() => scroll(matchRef, 1)}  className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">›</button>
+            </div>
+          </div>
+          <div ref={matchRef} className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollSnapType: 'x mandatory' }}>
+            {matched.map((book) => (
+              <div key={book.id} className="flex-none w-36" style={{ scrollSnapAlign: 'start' }}>
+                <BookCard book={book} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {discover.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Descobrir · {discover.length} livros</p>
+            <div className="flex gap-1">
+              <button onClick={() => scroll(discoverRef, -1)} className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">‹</button>
+              <button onClick={() => scroll(discoverRef, 1)}  className="w-6 h-6 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm">›</button>
+            </div>
+          </div>
+          <div ref={discoverRef} className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollSnapType: 'x mandatory' }}>
+            {discover.map((book, i) => (
+              <DiscoverCard key={book.isbn ?? i} book={book} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ── Aba Em Alta ──────────────────────────────────────────────────
+
+function EmAltaTab() {
+  return (
+    <>
+      <TrendingCarousel fetcher={getGoogleBooksTrending} />
+      <TrendingCarousel fetcher={() => getNytTrending('hardcover-fiction')} />
+      <TrendingCarousel fetcher={() => getNytTrending('hardcover-nonfiction')} />
+    </>
+  )
+}
+
 // ── Página ───────────────────────────────────────────────────────
 
 const TABS = [
-  { value: 'premios', label: 'Prêmios' },
-  { value: 'generos', label: 'Por Gênero' },
+  { value: 'premios',  label: 'Prêmios' },
+  { value: 'generos',  label: 'Por Gênero' },
+  { value: 'em-alta',  label: 'Em Alta' },
 ]
 
 export default function Curadoria() {
@@ -221,7 +376,9 @@ export default function Curadoria() {
         ))}
       </div>
 
-      {tab === 'premios' ? <PremiosTab /> : <GenerosTab />}
+      {tab === 'premios'  && <PremiosTab />}
+      {tab === 'generos'  && <GenerosTab />}
+      {tab === 'em-alta'  && <EmAltaTab />}
 
       <style>{`.scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}.scrollbar-hide::-webkit-scrollbar{display:none}`}</style>
     </div>

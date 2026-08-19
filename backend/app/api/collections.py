@@ -232,3 +232,138 @@ async def _em_alta(db: AsyncSession) -> list:
         .limit(50)
     )
     return result.scalars().all()
+
+
+# ── Trending Externos (Google Books + NYT) ────────────────────────
+
+from dataclasses import dataclass
+from ..core.config import get_settings
+
+
+@dataclass
+class _RawBook:
+    title: str
+    authors: list[str]
+    isbn: str | None
+    cover_url: str | None
+    description: str | None
+    source: str
+
+
+async def _cross_reference(raw_books: list[_RawBook], db: AsyncSession):
+    """Cruza livros externos com o acervo pelo ISBN."""
+    isbns = [b.isbn for b in raw_books if b.isbn]
+    matched_map: dict[str, Book] = {}
+    if isbns:
+        res = await db.execute(
+            select(Book).options(defer(Book.embedding)).where(Book.isbn.in_(isbns))
+        )
+        for book in res.scalars().all():
+            if book.isbn:
+                matched_map[book.isbn] = book
+
+    matched, discover = [], []
+    for raw in raw_books:
+        if raw.isbn and raw.isbn in matched_map:
+            matched.append(matched_map[raw.isbn])
+        else:
+            discover.append(raw)
+    return matched, discover
+
+
+async def _fetch_google_books(api_key: str | None) -> list[_RawBook]:
+    """Busca bestsellers no Google Books (funciona sem key, com rate limit suave)."""
+    params: dict = {"q": "bestseller", "maxResults": 40, "orderBy": "relevance", "printType": "books"}
+    if api_key:
+        params["key"] = api_key
+
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
+            resp = await client.get("https://www.googleapis.com/books/v1/volumes", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        return []
+
+    books = []
+    for item in data.get("items", []):
+        info = item.get("volumeInfo", {})
+        title = info.get("title", "").strip()
+        authors = info.get("authors", [])
+        if not title or not authors:
+            continue
+
+        isbn = None
+        for ident in info.get("industryIdentifiers", []):
+            if ident.get("type") == "ISBN_13":
+                isbn = ident["identifier"]
+                break
+
+        thumb = info.get("imageLinks", {}).get("thumbnail", "")
+        cover = thumb.replace("http://", "https://").replace("zoom=1", "zoom=2") if thumb else None
+        desc = info.get("description", "")[:500] if info.get("description") else None
+
+        books.append(_RawBook(title=title, authors=authors, isbn=isbn,
+                              cover_url=cover, description=desc, source="google_books"))
+    return books
+
+
+async def _fetch_nyt(api_key: str, list_name: str) -> list[_RawBook]:
+    """Busca uma lista específica do NYT Bestsellers."""
+    url = f"https://api.nytimes.com/svc/books/v3/lists/current/{list_name}.json"
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
+            resp = await client.get(url, params={"api-key": api_key})
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        return []
+
+    books = []
+    for b in data.get("results", {}).get("books", []):
+        isbn = b.get("primary_isbn13") or b.get("primary_isbn10") or None
+        books.append(_RawBook(
+            title=b.get("title", "").title(),
+            authors=[b.get("author", "")],
+            isbn=isbn,
+            cover_url=b.get("book_image") or None,
+            description=b.get("description") or None,
+            source="nyt",
+        ))
+    return books
+
+
+def _raw_to_dict(r: _RawBook) -> dict:
+    return {"title": r.title, "author": ", ".join(r.authors), "isbn": r.isbn,
+            "cover_url": r.cover_url, "description": r.description, "source": r.source}
+
+
+@router.get("/computed/google-books")
+async def google_books_trending(db: AsyncSession = Depends(get_db)):
+    settings = get_settings()
+    raw = await _fetch_google_books(settings.GOOGLE_BOOKS_API_KEY or None)
+    matched, discover = await _cross_reference(raw, db)
+    return {
+        "source": "google_books",
+        "name": "Google Books Destaques",
+        "matched": [BookResponse.model_validate(b) for b in matched],
+        "discover": [_raw_to_dict(r) for r in discover[:20]],
+        "configured": True,
+    }
+
+
+@router.get("/computed/nyt")
+async def nyt_trending(list_name: str = "hardcover-fiction", db: AsyncSession = Depends(get_db)):
+    settings = get_settings()
+    if not settings.NYT_API_KEY:
+        return {"source": "nyt", "name": "NYT Bestsellers", "matched": [], "discover": [], "configured": False}
+    raw = await _fetch_nyt(settings.NYT_API_KEY, list_name)
+    matched, discover = await _cross_reference(raw, db)
+    label = "Ficção" if "fiction" in list_name else "Não-Ficção"
+    return {
+        "source": "nyt",
+        "name": f"NYT Bestsellers — {label}",
+        "matched": [BookResponse.model_validate(b) for b in matched],
+        "discover": [_raw_to_dict(r) for r in discover[:15]],
+        "configured": True,
+    }

@@ -8,13 +8,14 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str = ""
     GOOGLE_BOOKS_API_KEY: str = ""
+    NYT_API_KEY: str = ""
 
     # Modelo de embeddings local (fastembed, sem API key, suporte a português)
     EMBEDDING_MODEL: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     EMBEDDING_DIMENSIONS: int = 384  # dimensões do modelo multilingual
 
     # Modelo de geração via Groq (gratuito)
-    GENERATION_MODEL: str = "llama-3.3-70b-versatile"
+    GENERATION_MODEL: str = "groq/compound"
 
     RAG_TOP_K: int = 5
 
