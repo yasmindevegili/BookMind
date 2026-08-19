@@ -291,6 +291,30 @@ async def _cross_reference(raw_books: list[_RawBook], db: AsyncSession):
     return matched, discover
 
 
+async def _cross_reference_by_title(raw_books: list[_RawBook], db: AsyncSession):
+    """Cruza livros externos com o acervo por título (para fontes sem ISBN)."""
+    titles = [b.title for b in raw_books if b.title]
+    matched_map: dict[str, Book] = {}
+    for title in titles:
+        res = await db.execute(
+            select(Book).options(defer(Book.embedding))
+            .where(Book.title.ilike(f"%{title}%"))
+            .limit(1)
+        )
+        book = res.scalar_one_or_none()
+        if book:
+            matched_map[title.lower()] = book
+
+    matched, discover = [], []
+    for raw in raw_books:
+        key = raw.title.lower()
+        if key in matched_map:
+            matched.append(matched_map[key])
+        else:
+            discover.append(raw)
+    return matched, discover
+
+
 async def _fetch_google_books(api_key: str | None) -> list[_RawBook]:
     """Busca bestsellers no Google Books (funciona sem key, com rate limit suave)."""
     params: dict = {"q": "bestseller", "maxResults": 40, "orderBy": "relevance", "printType": "books"}
@@ -325,6 +349,48 @@ async def _fetch_google_books(api_key: str | None) -> list[_RawBook]:
 
         books.append(_RawBook(title=title, authors=authors, isbn=isbn,
                               cover_url=cover, description=desc, source="google_books"))
+    return books
+
+
+async def _fetch_tag_livros(collection: str = "best-sellers") -> list[_RawBook]:
+    """Busca curadoria Tag Livros via Shopify JSON API (sem key, já em português)."""
+    url = f"https://livraria.taglivros.com/collections/{collection}/products.json"
+    try:
+        async with httpx.AsyncClient(timeout=10, verify=False) as client:
+            resp = await client.get(url, params={"limit": 30})
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        return []
+
+    books = []
+    for p in data.get("products", []):
+        raw_title: str = p.get("title", "").strip()
+        # Remove prefixo "Kit " ou "Livro " que a Tag usa nos produtos
+        title = raw_title.removeprefix("Kit ").removeprefix("Livro ").strip()
+        if not title:
+            continue
+
+        # Autor vem nas tags do produto Shopify (ex: ['best-seller', 'Maya Angelou'])
+        skip_tags = {"best-seller", "2024", "2025", "2026", "kit", "livro"}
+        authors = [t.title() for t in p.get("tags", []) if t.lower() not in skip_tags]
+
+        imgs = p.get("images", [])
+        cover = imgs[0].get("src") if imgs else None
+
+        body_html: str = p.get("body_html") or ""
+        # Remove HTML para extrair texto da descrição
+        import re as _re
+        desc = _re.sub(r"<[^>]+>", " ", body_html).strip()[:400] or None
+
+        books.append(_RawBook(
+            title=title,
+            authors=authors if authors else ["Tag Livros"],
+            isbn=None,
+            cover_url=cover,
+            description=desc or None,
+            source="tag_livros",
+        ))
     return books
 
 
@@ -468,6 +534,25 @@ async def google_books_trending(db: AsyncSession = Depends(get_db)):
     return {
         "source": "google_books",
         "name": "Google Books Destaques",
+        "matched": [BookResponse.model_validate(b) for b in matched],
+        "discover": [_raw_to_dict(r) for r in discover[:20]],
+        "configured": True,
+    }
+
+
+@router.get("/computed/tag-livros")
+async def tag_livros_trending(collection: str = "best-sellers", db: AsyncSession = Depends(get_db)):
+    cache_key = f"tag_livros_{collection}"
+    raw = _cache_get(cache_key)
+    if raw is None:
+        raw = await _fetch_tag_livros(collection)
+        _cache_set(cache_key, raw)
+    matched, discover = await _cross_reference_by_title(raw, db)
+    label_map = {"best-sellers": "Best-Sellers", "kits-curadoria": "Curadoria Editorial"}
+    label = label_map.get(collection, collection.replace("-", " ").title())
+    return {
+        "source": "tag_livros",
+        "name": f"Tag Livros — {label}",
         "matched": [BookResponse.model_validate(b) for b in matched],
         "discover": [_raw_to_dict(r) for r in discover[:20]],
         "configured": True,

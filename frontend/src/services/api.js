@@ -49,5 +49,7 @@ export const getGenreList = () => request('/collections/computed/generos')
 export const getGenreBooks = (genre) => request(`/collections/computed/genero/${encodeURIComponent(genre)}`)
 
 export const getGoogleBooksTrending = () => request('/collections/computed/google-books')
+export const getTagLivrosTrending = (collection = 'best-sellers') =>
+  request(`/collections/computed/tag-livros?collection=${collection}`)
 export const getNytTrending = (list = 'hardcover-fiction') =>
   request(`/collections/computed/nyt?list_name=${list}`)

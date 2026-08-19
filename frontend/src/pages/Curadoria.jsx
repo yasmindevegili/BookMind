@@ -7,6 +7,7 @@ import {
   getGenreBooks,
   getGenreList,
   getGoogleBooksTrending,
+  getTagLivrosTrending,
   getNytTrending,
   initializeCuradoria,
 } from '../services/api'
@@ -335,9 +336,9 @@ function TrendingCarousel({ fetcher }) {
 function EmAltaTab() {
   return (
     <>
+      <TrendingCarousel fetcher={() => getTagLivrosTrending('best-sellers')} />
+      <TrendingCarousel fetcher={() => getTagLivrosTrending('kits-curadoria')} />
       <TrendingCarousel fetcher={getGoogleBooksTrending} />
-      <TrendingCarousel fetcher={() => getNytTrending('hardcover-fiction')} />
-      <TrendingCarousel fetcher={() => getNytTrending('hardcover-nonfiction')} />
     </>
   )
 }
