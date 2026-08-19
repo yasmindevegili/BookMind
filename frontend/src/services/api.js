@@ -20,6 +20,7 @@ export const updateBook = (id, data) => request(`/books/${id}`, { method: 'PUT',
 export const deleteBook = (id) => request(`/books/${id}`, { method: 'DELETE' })
 export const getTags = () => request('/books/tags')
 export const getBooksByTag = (tag) => request(`/books/by-tag/${encodeURIComponent(tag)}`)
+export const getBooksByStatus = (status) => request(`/books/by-status/${status}`)
 
 export const updateBookStatus = (id, status) =>
   request(`/books/${id}/status`, { method: 'PATCH', body: { status } })
