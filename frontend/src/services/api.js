@@ -27,6 +27,11 @@ export const updateBookStatus = (id, status) =>
 export const getSimilarBooks = (id, limit = 5) =>
   request(`/books/${id}/similar?limit=${limit}`)
 
+export const getDiscoverBooks = (recentlyViewed = []) => {
+  const qs = recentlyViewed.length ? `?recently_viewed=${recentlyViewed.join(',')}` : ''
+  return request(`/books/discover${qs}`)
+}
+
 export const getAnnotations = (bookId) => request(`/annotations/book/${bookId}`)
 export const createAnnotation = (data) => request('/annotations/', { method: 'POST', body: data })
 export const deleteAnnotation = (id) => request(`/annotations/${id}`, { method: 'DELETE' })
