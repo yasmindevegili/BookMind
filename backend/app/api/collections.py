@@ -333,9 +333,22 @@ async def _find_portuguese_edition(
 
     for item in items:
         info = item.get("volumeInfo", {})
+
+        # Rejeita se o idioma do livro não for português — langRestrict=pt pode
+        # retornar livros em inglês disponíveis no mercado PT/BR
+        if info.get("language", "en") not in ("pt", "pt-BR", "pt-PT"):
+            continue
+
         pt_title = (info.get("title") or "").strip()
         pt_authors = info.get("authors", [])
         if not pt_title or not pt_authors:
+            continue
+
+        # Rejeita se o título PT for idêntico ao inglês (não é tradução real)
+        import unicodedata as _ud
+        def _norm(s: str) -> str:
+            return _ud.normalize("NFKD", s).encode("ascii", "ignore").decode().lower().strip()
+        if _norm(pt_title) == _norm(title):
             continue
 
         # Valida: pelo menos uma palavra do sobrenome do autor original deve aparecer
