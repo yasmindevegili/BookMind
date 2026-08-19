@@ -1,4 +1,5 @@
 import asyncio
+import unicodedata
 import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, or_, select
@@ -237,8 +238,26 @@ async def _em_alta(db: AsyncSession) -> list:
 
 # ── Trending Externos (Google Books + NYT) ────────────────────────
 
+import time
 from dataclasses import dataclass
 from ..core.config import get_settings
+
+# Cache em memória para resultados de APIs externas — evita esgotar quota em testes
+# (simplificação intencional: em produção, usaria Redis com TTL distribuído)
+_CACHE: dict[str, tuple[float, object]] = {}
+_CACHE_TTL = 60 * 60 * 6  # 6 horas
+
+
+def _cache_get(key: str) -> object | None:
+    entry = _CACHE.get(key)
+    if entry and time.monotonic() - entry[0] < _CACHE_TTL:
+        return entry[1]
+    _CACHE.pop(key, None)
+    return None
+
+
+def _cache_set(key: str, value: object) -> None:
+    _CACHE[key] = (time.monotonic(), value)
 
 
 @dataclass
@@ -315,10 +334,17 @@ async def _find_portuguese_edition(
     author: str,
     gb_key: str | None,
 ) -> "_RawBook | None":
-    """Busca edição em português de um livro originalmente em inglês via Google Books."""
+    """Busca edição em português de um livro originalmente em inglês via Google Books.
+
+    Estratégia: busca o título original como palavra-chave + autor com langRestrict=pt.
+    Edições PT no Google Books costumam mencionar o título original em inglês na descrição
+    (ex: "Tradução de 'Onyx Storm'"), então a busca de texto livre acha a tradução certa
+    mesmo que o título PT seja completamente diferente.
+    """
+    author_last = author.split()[-1]
     params = {
-        "q": f'intitle:"{title}" inauthor:"{author.split()[-1]}"',
-        "maxResults": 3,
+        "q": f'"{title}" "{author_last}"',
+        "maxResults": 5,
         "langRestrict": "pt",
         "printType": "books",
     }
@@ -345,9 +371,8 @@ async def _find_portuguese_edition(
             continue
 
         # Rejeita se o título PT for idêntico ao inglês (não é tradução real)
-        import unicodedata as _ud
         def _norm(s: str) -> str:
-            return _ud.normalize("NFKD", s).encode("ascii", "ignore").decode().lower().strip()
+            return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower().strip()
         if _norm(pt_title) == _norm(title):
             continue
 
@@ -376,9 +401,17 @@ async def _find_portuguese_edition(
     return None
 
 
+def _nyt_target_date() -> str:
+    """Retorna uma data ~12 meses atrás — tempo suficiente para traduções PT existirem."""
+    from datetime import date, timedelta
+    target = date.today().replace(day=1) - timedelta(days=365)
+    return target.strftime("%Y-%m-%d")
+
+
 async def _fetch_nyt(api_key: str, list_name: str, gb_key: str | None = None) -> list[_RawBook]:
-    """Busca uma lista NYT Bestsellers e enriquece com edições em português via Google Books."""
-    url = f"https://api.nytimes.com/svc/books/v3/lists/current/{list_name}.json"
+    """Busca lista NYT de ~12 meses atrás e substitui por edições em português via Google Books."""
+    date_str = _nyt_target_date()
+    url = f"https://api.nytimes.com/svc/books/v3/lists/{date_str}/{list_name}.json"
     try:
         async with httpx.AsyncClient(timeout=10, verify=False) as client:
             resp = await client.get(url, params={"api-key": api_key})
@@ -426,7 +459,11 @@ def _raw_to_dict(r: _RawBook) -> dict:
 @router.get("/computed/google-books")
 async def google_books_trending(db: AsyncSession = Depends(get_db)):
     settings = get_settings()
-    raw = await _fetch_google_books(settings.GOOGLE_BOOKS_API_KEY or None)
+    cache_key = "google_books_trending"
+    raw = _cache_get(cache_key)
+    if raw is None:
+        raw = await _fetch_google_books(settings.GOOGLE_BOOKS_API_KEY or None)
+        _cache_set(cache_key, raw)
     matched, discover = await _cross_reference(raw, db)
     return {
         "source": "google_books",
@@ -442,12 +479,17 @@ async def nyt_trending(list_name: str = "hardcover-fiction", db: AsyncSession = 
     settings = get_settings()
     if not settings.NYT_API_KEY:
         return {"source": "nyt", "name": "NYT Bestsellers", "matched": [], "discover": [], "configured": False}
-    raw = await _fetch_nyt(settings.NYT_API_KEY, list_name, settings.GOOGLE_BOOKS_API_KEY or None)
+    cache_key = f"nyt_{list_name}"
+    raw = _cache_get(cache_key)
+    if raw is None:
+        raw = await _fetch_nyt(settings.NYT_API_KEY, list_name, settings.GOOGLE_BOOKS_API_KEY or None)
+        _cache_set(cache_key, raw)
     matched, discover = await _cross_reference(raw, db)
     label = "Ficção" if "fiction" in list_name else "Não-Ficção"
+    year = _nyt_target_date()[:4]
     return {
         "source": "nyt",
-        "name": f"NYT Bestsellers — {label}",
+        "name": f"NYT Bestsellers {year} — {label}",
         "matched": [BookResponse.model_validate(b) for b in matched],
         "discover": [_raw_to_dict(r) for r in discover[:15]],
         "configured": True,
