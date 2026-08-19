@@ -18,6 +18,9 @@ from ..services.tagger import tagger_service
 
 router = APIRouter()
 
+# Limita tasks simultâneas de tagging para não esgotar o pool de conexões DB (size=5, overflow=10)
+_tag_db_sem = asyncio.Semaphore(5)
+
 STATUS_ORDER = case(
     (Book.status == BookStatus.want_to_read, 0),
     (Book.status == BookStatus.reading, 1),
@@ -72,39 +75,40 @@ def _award_to_slug(name: str) -> str:
 
 
 async def _tag_book(book_id: int) -> None:
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Book).where(Book.id == book_id))
-        book = result.scalar_one_or_none()
-        if not book:
-            return
+    async with _tag_db_sem:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Book).where(Book.id == book_id))
+            book = result.scalar_one_or_none()
+            if not book:
+                return
 
-        genre_tags, award_tags, title_en_resolved = await tagger_service.tag(
-            book.title, book.author, book.description, book.isbn, book.title_en
-        )
-
-        if genre_tags:
-            book.tags = genre_tags
-        if title_en_resolved and not book.title_en:
-            book.title_en = title_en_resolved
-
-        # Adiciona o livro às coleções de curadoria correspondentes aos prêmios
-        for award in award_tags:
-            slug = _award_to_slug(award)
-            col_result = await db.execute(
-                select(Collection).where(Collection.slug == slug)
+            genre_tags, award_tags, title_en_resolved = await tagger_service.tag(
+                book.title, book.author, book.description, book.isbn, book.title_en
             )
-            collection = col_result.scalar_one_or_none()
-            if not collection:
-                collection = Collection(name=award, slug=slug, type="curadoria")
-                db.add(collection)
-                await db.flush()
-            if book not in collection.books:
-                collection.books.append(book)
 
-        if genre_tags or award_tags:
-            await db.commit()
-        if genre_tags:
-            await _generate_book_embedding(book_id)
+            if genre_tags:
+                book.tags = genre_tags
+            if title_en_resolved and not book.title_en:
+                book.title_en = title_en_resolved
+
+            # Adiciona o livro às coleções de curadoria correspondentes aos prêmios
+            for award in award_tags:
+                slug = _award_to_slug(award)
+                col_result = await db.execute(
+                    select(Collection).where(Collection.slug == slug)
+                )
+                collection = col_result.scalar_one_or_none()
+                if not collection:
+                    collection = Collection(name=award, slug=slug, type="curadoria")
+                    db.add(collection)
+                    await db.flush()
+                if book not in collection.books:
+                    collection.books.append(book)
+
+            if genre_tags or award_tags:
+                await db.commit()
+            if genre_tags:
+                await _generate_book_embedding(book_id)
 
 
 async def _fetch_book_cover(book_id: int) -> None:

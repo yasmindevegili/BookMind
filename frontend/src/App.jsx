@@ -4,6 +4,7 @@ import Chat from './pages/Chat'
 import Collections from './pages/Collections'
 import Library from './pages/Library'
 import Profile from './pages/Profile'
+import StatusBooks from './pages/StatusBooks'
 import './index.css'
 
 function NavItem({ to, label, exact }) {
@@ -35,7 +36,6 @@ export default function App() {
           </div>
           <ul className="space-y-1">
             <li><NavItem to="/" label="Biblioteca" exact /></li>
-            <li><NavItem to="/collections" label="Coleções" /></li>
             <li><NavItem to="/chat" label="Chat" /></li>
             <li><NavItem to="/profile" label="Perfil" /></li>
           </ul>
@@ -48,6 +48,7 @@ export default function App() {
             <Route path="/chat" element={<Chat />} />
             <Route path="/books/:id" element={<BookDetail />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/status/:statusKey" element={<StatusBooks />} />
           </Routes>
         </main>
       </div>
