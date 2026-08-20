@@ -9,8 +9,9 @@ from ..core.config import get_settings
 
 settings = get_settings()
 
-# Modelo dedicado ao tagger — sem thinking mode, retorna JSON limpo e rápido
-_TAGGER_MODEL = "groq/compound-mini"
+# Qwen3 usa thinking mode (bloco <think> no conteúdo) — max_tokens alto para o thinking caber
+# O strip de </think> no parser extrai o JSON após o bloco
+_TAGGER_MODEL = "qwen/qwen3.6-27b"
 
 _OL_SEARCH_URL = "https://openlibrary.org/search.json"
 _OL_WORKS_URL = "https://openlibrary.org"
@@ -126,7 +127,7 @@ class TaggerService:
             try:
                 resp = await self.client.chat.completions.create(
                     model=_TAGGER_MODEL,
-                    max_tokens=300,
+                    max_tokens=4000,
                     temperature=0.2,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -164,7 +165,7 @@ class TaggerService:
             try:
                 resp = await self.client.chat.completions.create(
                     model=_TAGGER_MODEL,
-                    max_tokens=150,
+                    max_tokens=3500,
                     temperature=0.3,
                     messages=[{"role": "user", "content": prompt}],
                 )
