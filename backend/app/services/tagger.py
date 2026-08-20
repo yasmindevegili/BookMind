@@ -16,6 +16,7 @@ _TAGGER_MODEL = "qwen/qwen3.6-27b"
 _OL_SEARCH_URL = "https://openlibrary.org/search.json"
 _OL_WORKS_URL = "https://openlibrary.org"
 
+# Subjects do Open Library que são metadados, não gêneros literários
 _OL_NOISE = {
     "fiction", "nonfiction", "non-fiction", "accessible book", "protected daisy",
     "in library", "large type books", "open library", "internet archive",
@@ -25,6 +26,7 @@ _OL_NOISE = {
     "technology", "social science", "language arts", "literature",
 }
 
+# Padrões que indicam prêmios, coleções editoriais ou formatos — não gêneros
 _OL_AWARD_PATTERNS = [
     "prêmio", "premio", "prize", "award", "winner", "finalist", "shortlist",
     "booker", "pulitzer", "nobel", "jabuti", "camões", "pen ", "hugo award",
@@ -132,6 +134,9 @@ class TaggerService:
                     messages=[{"role": "user", "content": prompt}],
                 )
                 raw = resp.choices[0].message.content.strip()
+                # Remove bloco <think>...</think> (Qwen3 reasoning mode)
+                if "</think>" in raw:
+                    raw = raw.split("</think>")[-1].strip()
                 if raw.startswith("```"):
                     raw = raw.split("```")[1]
                     if raw.startswith("json"):
@@ -170,6 +175,8 @@ class TaggerService:
                     messages=[{"role": "user", "content": prompt}],
                 )
                 raw = resp.choices[0].message.content.strip()
+                if "</think>" in raw:
+                    raw = raw.split("</think>")[-1].strip()
                 tags = [t.strip().lower() for t in raw.split(",") if t.strip()]
                 return [t for t in tags if 3 <= len(t) <= 50][:8]
             except Exception:
@@ -219,6 +226,7 @@ class TaggerService:
                     continue
                 doc = docs[0]
 
+                # Valida correspondência mínima para evitar falsos positivos
                 result_title = doc.get("title", "").lower()
                 result_authors = " ".join(doc.get("author_name", [])).lower()
                 title_match = any(w in result_title for w in title.lower().split() if len(w) > 3)
@@ -226,7 +234,7 @@ class TaggerService:
                 if not (title_match or author_match):
                     continue
 
-                key = doc.get("key")
+                key = doc.get("key")  # ex: "/works/OL12345W"
                 if key and "/works/" in key:
                     return key
             except Exception:
