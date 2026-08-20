@@ -18,8 +18,8 @@ from ..services.tagger import tagger_service
 
 router = APIRouter()
 
-# Limita tasks simultâneas de tagging para não esgotar o pool de conexões DB (size=5, overflow=10)
-_tag_db_sem = asyncio.Semaphore(5)
+# Limita tasks simultâneas de tagging — pool DB tem size=5, overflow=10 (15 conexões max)
+_tag_db_sem = asyncio.Semaphore(10)
 
 STATUS_ORDER = case(
     (Book.status == BookStatus.want_to_read, 0),
