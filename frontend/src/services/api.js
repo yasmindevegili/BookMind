@@ -48,6 +48,7 @@ export const getComputedBooks = (slug) => request(`/collections/computed/${slug}
 export const getGenreList = () => request('/collections/computed/generos')
 export const getGenreBooks = (genre) => request(`/collections/computed/genero/${encodeURIComponent(genre)}`)
 
+export const getLancamentos = () => request('/collections/computed/lancamentos')
 export const getGoogleBooksTrending = () => request('/collections/computed/google-books')
 export const getTagLivrosTrending = (collection = 'best-sellers') =>
   request(`/collections/computed/tag-livros?collection=${collection}`)

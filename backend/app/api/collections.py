@@ -559,6 +559,145 @@ async def tag_livros_trending(collection: str = "best-sellers", db: AsyncSession
     }
 
 
+_PUBLISHERS_BR = [
+    "Companhia das Letras",
+    "Intrínseca",
+    "Record",
+    "Rocco",
+    "Sextante",
+    "Planeta",
+    "Darkside",
+    "Aleph",
+    "Objetiva",
+    "Bertrand Brasil",
+]
+
+
+async def _fetch_lancamentos_publisher(
+    client: httpx.AsyncClient, publisher: str, api_key: str | None
+) -> list[dict]:
+    """Busca lançamentos recentes de uma editora no Google Books."""
+    from datetime import date
+    min_year = date.today().year - 2  # últimos 2 anos
+    params = {
+        "q": f'inpublisher:"{publisher}"',
+        "maxResults": 8,
+        "orderBy": "newest",
+        "printType": "books",
+        "langRestrict": "pt",
+    }
+    if api_key:
+        params["key"] = api_key
+    try:
+        resp = await client.get("https://www.googleapis.com/books/v1/volumes", params=params)
+        resp.raise_for_status()
+        items = resp.json().get("items", [])
+    except Exception:
+        return []
+
+    results = []
+    for item in items:
+        info = item.get("volumeInfo", {})
+        if info.get("language") not in ("pt", "pt-BR", "pt-PT", None):
+            continue
+        pub_date = info.get("publishedDate", "")
+        try:
+            pub_year = int(pub_date[:4])
+        except (ValueError, TypeError):
+            pub_year = 0
+        if pub_year and pub_year < min_year:
+            continue
+
+        title = (info.get("title") or "").strip()
+        # Google Books às vezes retorna títulos em ALL CAPS
+        if title == title.upper() and len(title) > 3:
+            title = title.title()
+        authors = info.get("authors") or []
+        if not title or not authors:
+            continue
+
+        isbn = None
+        for ident in info.get("industryIdentifiers", []):
+            if ident.get("type") == "ISBN_13":
+                isbn = ident["identifier"]
+                break
+
+        thumb = info.get("imageLinks", {}).get("thumbnail", "")
+        cover = thumb.replace("http://", "https://").replace("zoom=1", "zoom=2") if thumb else None
+        rating = info.get("averageRating")
+
+        results.append({
+            "title": title,
+            "author": ", ".join(authors),
+            "isbn": isbn,
+            "cover_url": cover,
+            "description": (info.get("description") or "")[:400] or None,
+            "publisher": info.get("publisher") or publisher,
+            "published_date": pub_date,
+            "rating": rating,
+            "source": "google_books",
+        })
+    return results
+
+
+@router.get("/computed/lancamentos")
+async def lancamentos(db: AsyncSession = Depends(get_db)):
+    cache_key = "lancamentos"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        books_raw = cached
+    else:
+        settings = get_settings()
+        api_key = settings.GOOGLE_BOOKS_API_KEY or None
+        async with httpx.AsyncClient(timeout=12, verify=False) as client:
+            results = await asyncio.gather(
+                *[_fetch_lancamentos_publisher(client, pub, api_key) for pub in _PUBLISHERS_BR],
+                return_exceptions=True,
+            )
+        # Agrupa, deduplica por ISBN e ordena por data de publicação
+        seen_isbns: set[str] = set()
+        seen_titles: set[str] = set()
+        books_raw = []
+        for batch in results:
+            if isinstance(batch, list):
+                for b in batch:
+                    key = b["isbn"] if b["isbn"] else b["title"].lower()
+                    if key in seen_isbns or b["title"].lower() in seen_titles:
+                        continue
+                    seen_isbns.add(key)
+                    seen_titles.add(b["title"].lower())
+                    books_raw.append(b)
+        books_raw.sort(key=lambda b: b.get("published_date") or "", reverse=True)
+        _cache_set(cache_key, books_raw)
+
+    # Cruza com acervo por ISBN (defer não se aplica a select de colunas individuais)
+    isbns = [b["isbn"] for b in books_raw if b.get("isbn")]
+    acervo_map: dict[str, int] = {}
+    title_acervo_map: dict[str, int] = {}
+    if isbns:
+        res = await db.execute(select(Book.id, Book.isbn).where(Book.isbn.in_(isbns)))
+        for book_id, book_isbn in res.all():
+            if book_isbn:
+                acervo_map[book_isbn] = book_id
+    # fallback por título
+    for b in books_raw:
+        if b.get("isbn") and b["isbn"] in acervo_map:
+            continue
+        res = await db.execute(
+            select(Book.id).where(Book.title.ilike(b["title"])).limit(1)
+        )
+        row = res.scalar_one_or_none()
+        if row:
+            title_acervo_map[b["title"].lower()] = row
+
+    books_out = []
+    for b in books_raw:
+        acervo_id = acervo_map.get(b.get("isbn") or "") or title_acervo_map.get(b["title"].lower())
+        books_out.append({**b, "in_acervo": bool(acervo_id), "acervo_id": acervo_id})
+
+    return {"books": books_out[:50]}
+
+
 @router.get("/computed/nyt")
 async def nyt_trending(list_name: str = "hardcover-fiction", db: AsyncSession = Depends(get_db)):
     settings = get_settings()

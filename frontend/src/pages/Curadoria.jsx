@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import BookCard from '../components/BookCard'
 import {
   createBook,
@@ -7,6 +8,7 @@ import {
   getGenreBooks,
   getGenreList,
   getGoogleBooksTrending,
+  getLancamentos,
   getTagLivrosTrending,
   getNytTrending,
   initializeCuradoria,
@@ -343,12 +345,128 @@ function EmAltaTab() {
   )
 }
 
+// ── ReleaseCard — card unificado para lançamentos ────────────────
+
+function ReleaseCard({ book }) {
+  const navigate  = useNavigate()
+  const [state, setState] = useState('idle') // idle | adding | done
+
+  async function handleAdd() {
+    setState('adding')
+    try {
+      await createBook({
+        title: book.title,
+        author: book.author,
+        isbn: book.isbn || undefined,
+        cover_url: book.cover_url || undefined,
+        description: book.description || undefined,
+      })
+      setState('done')
+    } catch {
+      setState('idle')
+    }
+  }
+
+  const inAcervo = book.in_acervo || state === 'done'
+
+  return (
+    <div
+      className="relative group flex-none w-36 cursor-pointer"
+      style={{ scrollSnapAlign: 'start' }}
+      onClick={() => inAcervo && book.acervo_id && navigate(`/books/${book.acervo_id}`)}
+    >
+      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-gradient-to-br from-slate-50 to-indigo-100 mb-2">
+        {book.cover_url ? (
+          <img src={book.cover_url} alt={book.title} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center p-2 text-center">
+            <span className="text-2xl mb-1">📘</span>
+            <span className="text-xs text-gray-500 line-clamp-3">{book.title}</span>
+          </div>
+        )}
+
+        {inAcervo ? (
+          <div className="absolute inset-x-0 bottom-0 bg-indigo-600/80 text-white text-xs py-1 text-center">
+            ✓ No acervo
+          </div>
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); handleAdd() }}
+            disabled={state === 'adding'}
+            className="absolute inset-x-0 bottom-0 bg-indigo-600/90 backdrop-blur-sm text-white text-xs py-1.5 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-60"
+          >
+            {state === 'adding' ? '…' : '+ Adicionar'}
+          </button>
+        )}
+      </div>
+
+      <p className="text-xs font-medium text-gray-800 truncate">{book.title}</p>
+      <p className="text-xs text-gray-500 truncate">{book.author}</p>
+      {book.publisher && (
+        <p className="text-xs text-indigo-400 truncate">{book.publisher}</p>
+      )}
+      {book.rating && (
+        <p className="text-xs text-amber-500">{'★'.repeat(Math.round(book.rating))} {book.rating.toFixed(1)}</p>
+      )}
+    </div>
+  )
+}
+
+// ── Aba Lançamentos ──────────────────────────────────────────────
+
+function LancamentosTab() {
+  const [books, setBooks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    getLancamentos()
+      .then((d) => setBooks(d.books || []))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="py-20 text-center text-gray-300">Carregando lançamentos…</div>
+
+  if (books.length === 0) {
+    return (
+      <div className="py-20 text-center text-gray-400">
+        <p className="text-4xl mb-3">📦</p>
+        <p>Nenhum lançamento encontrado. Verifique a conexão com o Google Books.</p>
+      </div>
+    )
+  }
+
+  const scroll = (dir) => ref.current?.scrollBy({ left: dir * 240, behavior: 'smooth' })
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">
+            Lançamentos recentes · editoras brasileiras · {books.length} livros
+          </p>
+        </div>
+        <div className="flex gap-1">
+          <button onClick={() => scroll(-1)} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm transition-colors">‹</button>
+          <button onClick={() => scroll(1)}  className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm transition-colors">›</button>
+        </div>
+      </div>
+      <div ref={ref} className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide" style={{ scrollSnapType: 'x mandatory' }}>
+        {books.map((book, i) => (
+          <ReleaseCard key={book.isbn ?? i} book={book} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // ── Página ───────────────────────────────────────────────────────
 
 const TABS = [
-  { value: 'premios',  label: 'Prêmios' },
-  { value: 'generos',  label: 'Por Gênero' },
-  { value: 'em-alta',  label: 'Em Alta' },
+  { value: 'premios',     label: 'Prêmios' },
+  { value: 'generos',     label: 'Por Gênero' },
+  { value: 'em-alta',     label: 'Em Alta' },
+  { value: 'lancamentos', label: 'Lançamentos' },
 ]
 
 export default function Curadoria() {
@@ -377,9 +495,10 @@ export default function Curadoria() {
         ))}
       </div>
 
-      {tab === 'premios'  && <PremiosTab />}
-      {tab === 'generos'  && <GenerosTab />}
-      {tab === 'em-alta'  && <EmAltaTab />}
+      {tab === 'premios'     && <PremiosTab />}
+      {tab === 'generos'     && <GenerosTab />}
+      {tab === 'em-alta'     && <EmAltaTab />}
+      {tab === 'lancamentos' && <LancamentosTab />}
 
       <style>{`.scrollbar-hide{-ms-overflow-style:none;scrollbar-width:none}.scrollbar-hide::-webkit-scrollbar{display:none}`}</style>
     </div>
